@@ -835,42 +835,211 @@
       border-radius: 6px;
     }
 
-    /* Package Repository Cards (Linear Style) */
+    /* Package Repository Cards (Linear / Shadcn Style) */
     .package-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+      gap: 16px;
       margin-bottom: 24px;
     }
 
     .package-card {
-      background: var(--bg-surface);
+      background: var(--bg-card);
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
-      padding: 16px;
+      border-radius: var(--radius);
+      padding: 18px 20px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      transition: all 0.2s ease;
+      gap: 14px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    }
+
+    [data-theme="light"] .package-card {
+      background: #ffffff;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.04);
     }
 
     .package-card:hover {
       border-color: var(--border-focus);
       transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
     }
 
-    .package-card-header {
+    .package-card.active-filtered {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-glow), var(--shadow-sm);
+    }
+
+    .pkg-card-top {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .pkg-icon-box {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.22);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    .package-card:hover .pkg-icon-box {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 0 14px var(--primary-glow);
+    }
+
+    .pkg-header-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .pkg-title {
+      font-size: 0.96rem;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.015em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+      margin-bottom: 4px;
+    }
+
+    .pkg-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .pkg-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 1px 7px;
+      border-radius: 4px;
+      background: rgba(99, 102, 241, 0.12);
+      color: var(--primary);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+    }
+
+    .pkg-meta-files {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .pkg-catalog-box {
+      background: var(--chip-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .pkg-catalog-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 10px;
     }
 
-    .package-card-name {
-      font-size: 0.95rem;
+    .pkg-catalog-label {
+      font-size: 0.7rem;
       font-weight: 700;
-      color: var(--text-main);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .pkg-copy-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.72rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+    }
+
+    .pkg-copy-btn:hover {
+      color: var(--primary);
+      background: rgba(99, 102, 241, 0.1);
+    }
+
+    .pkg-catalog-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--accent-cyan);
+      text-decoration: none;
       font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      padding: 5px 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .pkg-catalog-link:hover {
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .pkg-catalog-link code {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    .pkg-card-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .btn-danger-soft {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-danger-soft:hover {
+      background: var(--danger-bg);
+      border-color: rgba(244, 63, 94, 0.35);
+      color: var(--danger);
     }
 
     /* Tables (Linear High-Density Style) */
@@ -2741,14 +2910,32 @@ AutoUpdater.Start("${data.xml_url}");`;
           btn.style.display = 'none';
         }
       }
+
+      // Highlight active package card and toggle button text
+      document.querySelectorAll('.package-card').forEach(card => {
+        const cardApp = card.getAttribute('data-app');
+        const filterBtnText = card.querySelector('.btn-filter-app span');
+        if (val && cardApp === val) {
+          card.classList.add('active-filtered');
+          if (filterBtnText) filterBtnText.innerText = 'Show All';
+        } else {
+          card.classList.remove('active-filtered');
+          if (filterBtnText) filterBtnText.innerText = 'Filter Files';
+        }
+      });
+
       loadPackages();
     }
 
     function selectPackageFilter(app) {
       const sel = document.getElementById('pkgFilterApp');
       if (sel) {
-        sel.value = app;
-        onPackageFilterChanged(app);
+        if (sel.value === app) {
+          sel.value = '';
+        } else {
+          sel.value = app;
+        }
+        onPackageFilterChanged(sel.value);
       }
     }
 
@@ -2810,31 +2997,79 @@ AutoUpdater.Start("${data.xml_url}");`;
             }
           }
 
-          // 5. Package Repository Cards in Packages Tab
+          // 5. Package Repository Cards in Packages Tab (Linear / Shadcn Style)
           const pkgAppsOverview = document.getElementById('pkgAppsOverview');
           if (pkgAppsOverview) {
             if (!apps || apps.length === 0) {
-              pkgAppsOverview.innerHTML = '<div style="font-size:0.82rem; color:var(--text-muted);">No applications registered in repository yet.</div>';
+              pkgAppsOverview.innerHTML = `
+                <div style="background:var(--chip-bg); border:1px dashed var(--border-subtle); border-radius:var(--radius); padding:28px 20px; text-align:center; margin-bottom:20px;">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--text-muted); margin-bottom:8px; opacity:0.7;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                  <div style="font-size:0.86rem; font-weight:600; color:var(--text-main); margin-bottom:4px;">No Packages in Repository</div>
+                  <div style="font-size:0.78rem; color:var(--text-muted);">Upload a ZIP archive in the 1-Click Release tab to register an application package.</div>
+                </div>
+              `;
             } else {
-              let html = '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><span style="font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">Registered Application Packages</span><span style="font-size:0.76rem; color:var(--primary); font-weight:600;">' + apps.length + ' Total</span></div><div class="package-grid">';
+              const currentFilter = document.getElementById('pkgFilterApp') ? document.getElementById('pkgFilterApp').value : '';
+              let html = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span style="font-size:0.76rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted);">Registered Application Packages</span>
+                  </div>
+                  <span class="badge-version">${apps.length} ${apps.length === 1 ? 'Package' : 'Packages'}</span>
+                </div>
+                <div class="package-grid">
+              `;
               apps.forEach(a => {
                 const xmlUrl = `${window.location.origin}/${a}/AutoUpdater.xml`;
+                const isSelected = (currentFilter === a);
+                let filesCountText = '';
+                if (gPackagesCache && Array.isArray(gPackagesCache)) {
+                  const appFiles = gPackagesCache.filter(f => f.app === a);
+                  if (appFiles.length > 0) {
+                    filesCountText = `• ${appFiles.length} file${appFiles.length > 1 ? 's' : ''}`;
+                  }
+                }
                 html += `
-                  <div class="package-card">
-                    <div>
-                      <div class="package-card-header">
-                        <span class="package-card-name">${a}</span>
-                        <span class="role-badge role-admin" style="font-size:0.68rem;">Package</span>
+                  <div class="package-card ${isSelected ? 'active-filtered' : ''}" data-app="${a}">
+                    <div class="pkg-card-top">
+                      <div class="pkg-icon-box">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                       </div>
-                      <div style="font-size:0.76rem; color:var(--text-muted); margin-bottom:12px;">
-                        Catalog: <a href="${xmlUrl}" target="_blank" style="color:var(--accent-cyan); text-decoration:none; font-family:monospace;">AutoUpdater.xml</a>
+                      <div class="pkg-header-info">
+                        <div class="pkg-title" title="${a}">${a}</div>
+                        <div class="pkg-meta-row">
+                          <span class="pkg-badge">Package</span>
+                          <span class="pkg-meta-files" id="pkg-files-${a}">${filesCountText}</span>
+                        </div>
                       </div>
                     </div>
-                    <div style="display:flex; gap:8px; justify-content:space-between; align-items:center; border-top:1px solid var(--border-subtle); padding-top:10px;">
-                      <button class="btn btn-secondary btn-sm" onclick="selectPackageFilter('${a}')" title="Filter table to ${a}">View Files</button>
-                      <button class="btn btn-danger btn-sm" onclick="promptDeleteApp('${a}')" title="Delete entire package ${a}">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        Delete Package
+
+                    <div class="pkg-catalog-box">
+                      <div class="pkg-catalog-header">
+                        <span class="pkg-catalog-label">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
+                          Catalog Feed
+                        </span>
+                        <button type="button" class="pkg-copy-btn" onclick="copyText('${xmlUrl}', this)" title="Copy AutoUpdater.xml URL">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                          <span>Copy URL</span>
+                        </button>
+                      </div>
+                      <a href="${xmlUrl}" target="_blank" class="pkg-catalog-link" title="Open AutoUpdater.xml in new tab">
+                        <code>/${a}/AutoUpdater.xml</code>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                    </div>
+
+                    <div class="pkg-card-actions">
+                      <button class="btn btn-secondary btn-sm btn-filter-app" onclick="selectPackageFilter('${a}')" title="${isSelected ? 'Show all packages' : 'Filter files to ' + a}">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                        <span>${isSelected ? 'Show All' : 'Filter Files'}</span>
+                      </button>
+                      <button class="btn btn-danger-soft btn-sm" onclick="promptDeleteApp('${a}')" title="Delete entire package ${a}">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                        <span>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -2884,6 +3119,23 @@ AutoUpdater.Start("${data.xml_url}");`;
 
     function renderPackagesTable(files) {
       const tbody = document.getElementById('filesTableBody');
+
+      // Update file counts on package overview cards
+      if (files && Array.isArray(files)) {
+        const counts = {};
+        files.forEach(f => {
+          if (f.app) counts[f.app] = (counts[f.app] || 0) + 1;
+        });
+        document.querySelectorAll('.package-card').forEach(card => {
+          const app = card.getAttribute('data-app');
+          const countEl = document.getElementById(`pkg-files-${app}`);
+          if (countEl) {
+            const c = counts[app] || 0;
+            countEl.innerText = c > 0 ? `• ${c} file${c > 1 ? 's' : ''}` : '';
+          }
+        });
+      }
+
       if (!files || files.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:32px;">No packages found in repository</td></tr>';
         return;
