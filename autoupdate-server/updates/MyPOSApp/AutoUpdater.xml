@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<item>
+    <version>3.0.0.0</version>
+    <url>/MyPOSApp/MyPOSSetup.exe</url>
+    <changelog>/MyPOSApp/changelog.html</changelog>
+    <mandatory>true</mandatory>
+    <checksum algorithm="SHA256">e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</checksum>
+</item>

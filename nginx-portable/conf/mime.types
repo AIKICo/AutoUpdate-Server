@@ -1,0 +1,25 @@
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    text/xml                              xml;
+    image/gif                             gif;
+    image/jpeg                            jpeg jpg;
+    application/javascript                js;
+    application/atom+xml                  atom;
+    application/rss+xml                   rss;
+
+    text/plain                            txt;
+    image/png                             png;
+    image/svg+xml                         svg svgz;
+    image/x-icon                          ico;
+
+    application/json                      json;
+    application/zip                       zip;
+    application/x-7z-compressed           7z;
+    application/x-rar-compressed          rar;
+    application/x-tar                     tar;
+    application/gzip                      gz tgz;
+    application/vnd.microsoft.portable-executable exe dll;
+    application/x-msi                     msi;
+    application/octet-stream              bin;
+}

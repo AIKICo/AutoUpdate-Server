@@ -1,0 +1,16 @@
+[Unit]
+Description=AutoUpdate-Server for AutoUpdater.NET
+After=network.target
+
+[Service]
+Type=forking
+# مسیر قرارگیری پوشه سرور در لینوکس (در صورت تغییر مسیر، این خط را به‌روز کنید):
+WorkingDirectory=/opt/autoupdate-server
+ExecStart=/opt/autoupdate-server/bin/autoupdate-server -d -p 8080 -w /opt/autoupdate-server/updates -r /opt/autoupdate-server/webroot -l /opt/autoupdate-server/autoupdate.log
+PIDFile=/opt/autoupdate-server/autoupdate.pid
+ExecStop=/opt/autoupdate-server/bin/autoupdate-server stop
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

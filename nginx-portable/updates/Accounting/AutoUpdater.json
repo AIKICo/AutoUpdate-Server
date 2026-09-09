@@ -1,0 +1,8 @@
+{
+  "version": "2.1.0.0",
+  "url": "/Accounting/AccountingSetup.zip",
+  "changelog": "/Accounting/changelog.html",
+  "mandatory": {
+    "mode": 0
+  }
+}

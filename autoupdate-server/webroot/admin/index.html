@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>پنل مدیریت وب‌سرور چندنرم‌افزاره (AutoUpdater.NET Server)</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card: #151d30;
+      --card-hover: #1c263f;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.2);
+      --border: #24324f;
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.15);
+      --danger: #ef4444;
+      --btn-primary: #0284c7;
+      --btn-primary-hover: #0369a1;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .status-badge {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .app-toolbar {
+      background: linear-gradient(135deg, #132742, #18233c);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+
+    .app-selector-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .app-selector-group label {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 0.95rem;
+    }
+
+    select, input, textarea {
+      background: #0b0f19;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    select:focus, input:focus, textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .stat-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+
+    .stat-title {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .stat-value {
+      font-size: 1.7rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      margin-bottom: 24px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h2 {
+      font-size: 1.15rem;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
+    .col-span-2 {
+      grid-column: span 2;
+    }
+
+    button {
+      background: var(--btn-primary);
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s, box-shadow 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button:hover {
+      background: var(--btn-primary-hover);
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      background: #24324f;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+    .btn-secondary:hover { background: #33446b; }
+
+    .btn-danger {
+      background: var(--danger);
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+    .btn-danger:hover { background: #dc2626; box-shadow: none; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      text-align: right;
+    }
+
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.88rem;
+    }
+
+    th {
+      background: #0f172a;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    tr:hover td {
+      background-color: rgba(255, 255, 255, 0.02);
+    }
+
+    .hash-badge {
+      background: #0b0f19;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-family: Consolas, monospace;
+      font-size: 0.8rem;
+      direction: ltr;
+      display: inline-block;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    .code-box {
+      background: #0b0f19;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      direction: ltr;
+      text-align: left;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.9rem;
+      color: #38bdf8;
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+
+    .links-group {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .link-pill {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      padding: 6px 14px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 0.85rem;
+      direction: ltr;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .link-pill:hover {
+      border-color: var(--accent);
+      background: #24324f;
+    }
+
+    @media (max-width: 768px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .col-span-2 { grid-column: span 1; }
+      .app-toolbar { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <h1>AutoUpdate-Server (توسعه‌یافته با C)</h1>
+          <div class="subtitle">مدیریت اختصاصی پوشه به‌روزرسانی برای هر نرم‌افزار ویژه AutoUpdater.NET</div>
+        </div>
+      </div>
+      <div class="status-badge">
+        <div class="status-pulse"></div>
+        <span>سرور فعال و در حال سرویس‌دهی</span>
+      </div>
+    </header>
+
+    <!-- Application Selection Toolbar -->
+    <div class="app-toolbar">
+      <div class="app-selector-group">
+        <label>📁 نرم‌افزار / پوشه جاری:</label>
+        <select id="currentApp" onchange="onAppChange()" style="min-width: 220px; font-weight: bold;">
+          <option value="">ریشه اصلی (Root)</option>
+        </select>
+        <button type="button" class="btn-secondary" onclick="promptNewApp()">➕ ایجاد پوشه نرم‌افزار جدید</button>
+        <button type="button" class="btn-danger" id="btnDeleteApp" onclick="deleteCurrentApp()" style="display:none;">🗑️ حذف این پوشه</button>
+      </div>
+      <div style="font-size: 0.85rem; color: #cbd5e1;">
+        <span>مسیر در وب: </span><code id="appWebPath" style="color:var(--accent); font-weight:bold;">/</code>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-title">مدت زمان فعالیت (Uptime)</div>
+        <div class="stat-value" id="st-uptime">0h 0m</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">مجموع درخواست‌ها</div>
+        <div class="stat-value" id="st-requests">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">حجم کل ترافیک دانلود شده</div>
+        <div class="stat-value" id="st-bytes">0 B</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">پورت فعال سرور</div>
+        <div class="stat-value" id="st-port">:8080</div>
+      </div>
+    </div>
+
+    <!-- Release Generator Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>📦 ایجاد نسخه جدید برای این نرم‌افزار (تولید AutoUpdater.xml / JSON)</h2>
+      </div>
+      <form id="genForm" onsubmit="generateConfig(event)">
+        <div class="form-grid">
+          <div>
+            <label>نام نرم‌افزار / پوشه اختصاصی:</label>
+            <input type="text" id="appName" placeholder="e.g. Accounting" required>
+          </div>
+          <div>
+            <label>نسخه جدید انتشار (New Version):</label>
+            <input type="text" id="appVer" value="2.0.0.0" placeholder="e.g. 2.1.0.0" required>
+          </div>
+          <div>
+            <label>نام فایل بسته نصبی (Setup.zip یا Setup.exe):</label>
+            <input type="text" id="fileUrl" placeholder="Setup.zip یا آدرس مستقیم" required>
+          </div>
+          <div>
+            <label>الگوریتم اعتبارسنجی هش (Checksum):</label>
+            <select id="hashAlgo">
+              <option value="SHA256">SHA256 (پیشنهادی و امن‌ترین)</option>
+              <option value="MD5">MD5</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label>مقدار هش Checksum: <span style="color:var(--text-muted); font-size:0.8rem;">(با زدن دکمه «انتخاب هش» در جدول پایین خودکار پر می‌شود)</span></label>
+            <input type="text" id="hashVal" placeholder="هش SHA-256 فایل نصبی">
+          </div>
+          <div class="col-span-2">
+            <label>به‌روزرسانی اجباری (Mandatory Update):</label>
+            <select id="mandatory">
+              <option value="false">خیر - اختیاری (کاربر می‌تواند به‌روزرسانی را رد کند)</option>
+              <option value="true">بله - اجباری (کاربر موظف به نصب آپدیت است)</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label>توضیحات و یادداشت تغییرات (Changelog):</label>
+            <textarea id="changelog" rows="3">• بهبود سرعت و عملکرد&#10;• رفع اشکالات گزارش شده&#10;• قابلیت‌های جدید نگارش</textarea>
+          </div>
+          <div class="col-span-2">
+            <button type="submit">✨ تولید و ذخیره فوری کاتالوگ در این پوشه</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Files Management Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>📁 فایل‌های پوشه جاری (<span id="folderTitle">Root</span>)</h2>
+      </div>
+
+      <div style="margin-bottom: 18px;">
+        <label>آپلود فایل نصبی جدید به این پوشه (.zip, .exe, .msi, .xml):</label>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+          <input type="file" id="uploadFile" style="max-width: 450px;">
+          <button type="button" onclick="uploadSelectedFile()">⬆️ بارگذاری به این پوشه و محاسبه خودکار هش</button>
+        </div>
+      </div>
+
+      <table id="filesTable">
+        <thead>
+          <tr>
+            <th>نام فایل</th>
+            <th>پوشه</th>
+            <th>حجم فایل</th>
+            <th>هش SHA-256</th>
+            <th>لینک مستقیم</th>
+            <th>عملیات</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="6" style="text-align:center;">در حال دریافت اطلاعات فایل‌ها...</td></tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top: 18px;">
+        <label>لینک‌های مستقیم این نرم‌افزار جهت تست یا استفاده در کلاینت:</label>
+        <div class="links-group" id="linksGroup">
+          <!-- Dynamic links injected here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Code Snippet Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>💻 راهنمای اتصال این نرم‌افزار در کد سی‌شارپ (C# / AutoUpdater.NET)</h2>
+      </div>
+      <p style="color:var(--text-muted); font-size:0.9rem;">کد آماده زیر را در پروژه سی‌شارپ مربوط به این نرم‌افزار کپی کنید:</p>
+      <pre class="code-box"><code id="csharpCode"></code></pre>
+    </div>
+  </div>
+
+  <script>
+    function formatTime(sec) {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      return `${h}h ${m}m ${s}s`;
+    }
+
+    function updateStats() {
+      fetch('/api/stats')
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('st-uptime').innerText = formatTime(data.uptime_sec);
+          document.getElementById('st-requests').innerText = data.total_requests.toLocaleString();
+          document.getElementById('st-bytes').innerText = data.total_bytes_str;
+          document.getElementById('st-port').innerText = ':' + data.port;
+        })
+        .catch(() => {});
+    }
+
+    function loadApps() {
+      fetch('/api/apps')
+        .then(res => res.json())
+        .then(apps => {
+          const sel = document.getElementById('currentApp');
+          const currentVal = sel.value;
+          sel.innerHTML = '<option value="">ریشه اصلی (Root)</option>' + 
+            apps.map(a => `<option value="${a}">📁 ${a}</option>`).join('');
+          
+          if (apps.includes(currentVal)) {
+            sel.value = currentVal;
+          }
+          onAppChange();
+        })
+        .catch(() => {});
+    }
+
+    function promptNewApp() {
+      const name = prompt('نام انگلیسی پوشه نرم‌افزار جدید را وارد فرمایید (مثال: Accounting, Warehouse, CRM, POS):');
+      if (!name || !name.trim()) return;
+      const cleanName = name.trim();
+      fetch('/api/create_app?name=' + encodeURIComponent(cleanName), { method: 'POST' })
+        .then(res => res.json())
+        .then(res => {
+          alert(res.message || 'پوشه نرم‌افزار جدید ساخته شد.');
+          fetch('/api/apps').then(r=>r.json()).then(apps => {
+            loadApps();
+            setTimeout(() => {
+              document.getElementById('currentApp').value = cleanName;
+              onAppChange();
+            }, 100);
+          });
+        })
+        .catch(err => alert('خطا: ' + err));
+    }
+
+    function deleteCurrentApp() {
+      const app = document.getElementById('currentApp').value;
+      if (!app) return;
+      if (!confirm('آیا از حذف پوشه ' + app + ' مطمئن هستید؟ (پوشه باید خالی باشد)')) return;
+
+      fetch('/api/delete_app?name=' + encodeURIComponent(app), { method: 'POST' })
+        .then(res => res.json())
+        .then(res => {
+          alert(res.message || 'پوشه حذف شد.');
+          document.getElementById('currentApp').value = '';
+          loadApps();
+        })
+        .catch(err => alert('خطا در حذف پوشه: ' + err));
+    }
+
+    function onAppChange() {
+      const app = document.getElementById('currentApp').value;
+      document.getElementById('appName').value = app || 'MyApplication';
+      document.getElementById('folderTitle').innerText = app || 'Root';
+      document.getElementById('appWebPath').innerText = app ? `/${app}/` : '/';
+
+      const btnDel = document.getElementById('btnDeleteApp');
+      if (app) {
+        btnDel.style.display = 'inline-flex';
+      } else {
+        btnDel.style.display = 'none';
+      }
+
+      updateLinksGroup();
+      updateCSharpCode();
+      loadFiles();
+    }
+
+    function updateLinksGroup() {
+      const app = document.getElementById('currentApp').value;
+      const prefix = app ? `/${app}` : '';
+      const container = document.getElementById('linksGroup');
+      container.innerHTML = `
+        <a class="link-pill" href="${prefix}/AutoUpdater.xml" target="_blank">📄 ${prefix}/AutoUpdater.xml</a>
+        <a class="link-pill" href="${prefix}/AutoUpdater.json" target="_blank">📋 ${prefix}/AutoUpdater.json</a>
+        <a class="link-pill" href="${prefix}/changelog.html" target="_blank">📝 ${prefix}/changelog.html</a>
+      `;
+    }
+
+    function loadFiles() {
+      const app = document.getElementById('currentApp').value;
+      const url = '/api/files?app=' + encodeURIComponent(app);
+
+      fetch(url)
+        .then(res => res.json())
+        .then(files => {
+          const tbody = document.querySelector('#filesTable tbody');
+          if (!files || files.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#94a3b8;">هیچ فایلی در پوشه <strong>${app || 'Root'}</strong> یافت نشد. فایل نصبی برنامه را از کادر بالا آپلود کنید.</td></tr>`;
+            return;
+          }
+          tbody.innerHTML = files.map(f => `
+            <tr>
+              <td><strong>${f.name}</strong></td>
+              <td><code>${f.app ? f.app : 'Root'}</code></td>
+              <td>${f.size_str}</td>
+              <td>
+                <span class="hash-badge" title="${f.sha256}">${f.sha256}</span>
+                <button class="btn-secondary" onclick="useHash('${f.name}', '${f.sha256}')" style="margin-right:6px;">انتخاب هش</button>
+              </td>
+              <td><a href="${f.url}" target="_blank" style="color:var(--accent); text-decoration:none;">🔗 دانلود مستقیم</a></td>
+              <td><button class="btn-danger" onclick="deleteFile('${f.app}', '${f.name}')">حذف</button></td>
+            </tr>
+          `).join('');
+        })
+        .catch(() => {});
+    }
+
+    function useHash(name, hash) {
+      document.getElementById('fileUrl').value = name;
+      document.getElementById('hashVal').value = hash;
+      document.getElementById('hashAlgo').value = 'SHA256';
+    }
+
+    function generateConfig(e) {
+      e.preventDefault();
+      const app = document.getElementById('currentApp').value;
+      const body = new URLSearchParams({
+        app_name: app || document.getElementById('appName').value,
+        version: document.getElementById('appVer').value,
+        file_url: document.getElementById('fileUrl').value,
+        hash_algo: document.getElementById('hashAlgo').value,
+        hash_val: document.getElementById('hashVal').value,
+        mandatory: document.getElementById('mandatory').value,
+        changelog: document.getElementById('changelog').value
+      }).toString();
+
+      fetch('/api/generate_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      })
+      .then(res => res.json())
+      .then(res => {
+        alert(res.message || 'فایل‌های AutoUpdater.xml و AutoUpdater.json با موفقیت تولید شدند.');
+        loadApps();
+        loadFiles();
+      })
+      .catch(err => alert('خطا در تولید فایل‌ها: ' + err));
+    }
+
+    function uploadSelectedFile() {
+      const fileInput = document.getElementById('uploadFile');
+      if (!fileInput.files || fileInput.files.length === 0) {
+        alert('لطفاً ابتدا یک فایل را انتخاب فرمایید.');
+        return;
+      }
+      const app = document.getElementById('currentApp').value;
+      const file = fileInput.files[0];
+      const url = '/api/upload?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(file.name);
+
+      const btn = event.target;
+      const originalText = btn.innerText;
+      btn.innerText = 'در حال آپلود و پردازش...';
+      btn.disabled = true;
+
+      fetch(url, {
+        method: 'POST',
+        body: file
+      })
+      .then(res => res.json())
+      .then(res => {
+        alert('فایل ' + res.filename + ' با موفقیت به پوشه ' + (res.app || 'Root') + ' منتقل شد.\nهش SHA-256: ' + res.sha256);
+        useHash(res.filename, res.sha256);
+        loadFiles();
+        fileInput.value = '';
+      })
+      .catch(err => alert('خطا در بارگذاری فایل: ' + err))
+      .finally(() => {
+        btn.innerText = originalText;
+        btn.disabled = false;
+      });
+    }
+
+    function deleteFile(app, name) {
+      if (!confirm('آیا از حذف فایل ' + name + ' از پوشه ' + (app || 'Root') + ' مطمئن هستید؟')) return;
+      fetch('/api/delete?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(name), { method: 'POST' })
+        .then(res => res.json())
+        .then(res => {
+          loadFiles();
+        })
+        .catch(err => alert('خطا: ' + err));
+    }
+
+    function updateCSharpCode() {
+      const app = document.getElementById('currentApp').value;
+      const currentHost = window.location.host || "your-linux-server:8080";
+      const xmlUrl = app ? `http://${currentHost}/${app}/AutoUpdater.xml` : `http://${currentHost}/AutoUpdater.xml`;
+      const jsonUrl = app ? `http://${currentHost}/${app}/AutoUpdater.json` : `http://${currentHost}/AutoUpdater.json`;
+
+      document.getElementById('csharpCode').innerText = 
+`// در پروژه سی‌شارپ مربوط به نرم‌افزار "${app || 'عمومی'}":
+using AutoUpdaterDotNET;
+
+public void CheckSoftwareUpdate()
+{
+    // دریافت اطلاعات به‌روزرسانی از پوشه اختصاصی این نرم‌افزار روی سرور:
+    AutoUpdater.Start("${xmlUrl}");
+
+    // یا در صورت استفاده از ساختار JSON:
+    // AutoUpdater.Start("${jsonUrl}");
+}`;
+    }
+
+    loadApps();
+    updateStats();
+    setInterval(updateStats, 3000);
+  </script>
+</body>
+</html>

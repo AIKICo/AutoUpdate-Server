@@ -1,0 +1,15 @@
+# Build and temporary files
+*.log
+*.pid
+*.pdb
+*.obj
+*.o
+temp/
+logs/nginx.pid
+logs/*.log
+autoupdate.pid
+autoupdate.log
+
+# OS generated
+.DS_Store
+Thumbs.db
