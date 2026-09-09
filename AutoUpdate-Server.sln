@@ -1,0 +1,30 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.9.12120.119
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "autoupdate-server", "autoupdate-server\autoupdate-server.vcxproj", "{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Debug|x64.ActiveCfg = Debug|x64
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Debug|x64.Build.0 = Debug|x64
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Debug|x86.ActiveCfg = Debug|Win32
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Debug|x86.Build.0 = Debug|Win32
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Release|x64.ActiveCfg = Release|x64
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Release|x64.Build.0 = Release|x64
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Release|x86.ActiveCfg = Release|Win32
+		{8B3F3C6D-91D2-488B-A3B9-9DE6A648C123}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4F5A6B7C-8D9E-0F1A-2B3C-4D5E6F7A8B9C}
+	EndGlobalSection
+EndGlobal

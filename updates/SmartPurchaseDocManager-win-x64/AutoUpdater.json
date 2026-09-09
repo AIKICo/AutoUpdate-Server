@@ -1,0 +1,12 @@
+{
+  "version": "1.0.9748.35239",
+  "url": "http://localhost:8000/SmartPurchaseDocManager-win-x64/SmartPurchaseDocManager-win-x64.zip",
+  "changelog": "http://localhost:8000/SmartPurchaseDocManager-win-x64/changelog.html",
+  "mandatory": {
+    "mode": 0
+  },
+  "checksum": {
+    "value": "a73f0f2cce9810696289d38554aa7121508ce87d0366d4d0e1fc9494de4f03ac",
+    "hashingAlgorithm": "SHA256"
+  }
+}

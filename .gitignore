@@ -4,6 +4,9 @@
 *.pdb
 *.obj
 *.o
+obj/
+.vs/
+*.user
 temp/
 logs/nginx.pid
 logs/*.log
@@ -13,3 +16,18 @@ autoupdate.log
 # OS generated
 .DS_Store
 Thumbs.db
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Large update archives & published binaries
+*.zip
+*.tar.gz
+updates/**/*.zip
+autoupdate-server/updates/**/*.zip
+publish/
+bin/
+autoupdate-server/bin/
+

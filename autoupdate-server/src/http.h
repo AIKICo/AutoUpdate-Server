@@ -22,6 +22,8 @@ typedef struct {
     char query[1024];
     char range_header[128];
     char auth_header[256];
+    char host_header[256];
+    char cookie_header[512];
     char content_type[128];
     size_t content_length;
     const char *body;
@@ -29,6 +31,7 @@ typedef struct {
 } http_request_t;
 
 int http_parse_request(const char *raw_req, size_t raw_len, http_request_t *req);
+int http_get_cookie(const http_request_t *req, const char *cookie_name, char *out_val, size_t out_len);
 int http_send_response(socket_t sock, int code, const char *status_text, const char *content_type, const char *extra_headers, const void *body, size_t body_len);
 int http_send_json(socket_t sock, int code, const char *json_body);
 int http_send_error(socket_t sock, int code, const char *message);

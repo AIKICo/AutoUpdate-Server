@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<item>
+    <version>1.0.0.0</version>
+    <url>/Setup.zip</url>
+    <changelog>/changelog.html</changelog>
+    <mandatory>false</mandatory>
+</item>

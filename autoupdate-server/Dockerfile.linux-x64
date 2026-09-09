@@ -1,0 +1,25 @@
+# Multi-stage Dockerfile for AutoUpdate-Server Linux x64
+FROM debian:bookworm-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc make libc6-dev libsqlite3-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+RUN make publish-linux-x64
+
+# Stage 2: Minimal runtime image
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsqlite3-0 ca-certificates tar unzip curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/autoupdate-server
+COPY --from=builder /app/publish/linux-x64/ /opt/autoupdate-server/
+
+EXPOSE 8000
+VOLUME ["/opt/autoupdate-server/updates"]
+
+ENTRYPOINT ["./autoupdate-server", "-c", "config.ini"]

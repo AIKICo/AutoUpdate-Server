@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <pthread.h>
+#endif
 #include <signal.h>
 #include <time.h>
 #include <errno.h>
@@ -22,9 +24,11 @@ typedef struct {
     server_ctx_t *ctx;
 } client_thread_arg_t;
 
+static server_ctx_t *g_active_ctx = NULL;
+
 int server_init(server_ctx_t *ctx, int port, const char *updates_dir, const char *webroot_dir, const char *user, const char *pass) {
     memset(ctx, 0, sizeof(*ctx));
-    ctx->port = port > 0 ? port : 8080;
+    ctx->port = port > 0 ? port : DEFAULT_PORT;
     ctx->start_time = (uint64_t)time(NULL);
 
     strncpy(ctx->updates_dir, updates_dir ? updates_dir : "./updates", sizeof(ctx->updates_dir) - 1);
@@ -60,27 +64,66 @@ static void *client_worker(void *arg) {
         return NULL;
     }
 
-    /* Set socket timeout to prevent hanging connections */
+    /* Set socket timeout to prevent hanging connections (120s for large zip uploads) */
 #ifdef _WIN32
-    DWORD timeout_ms = 20000;
+    DWORD timeout_ms = 120000;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_ms, sizeof(timeout_ms));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout_ms, sizeof(timeout_ms));
 #else
     struct timeval tv;
-    tv.tv_sec = 20;
+    tv.tv_sec = 120;
     tv.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 #endif
 
     int headers_parsed = 0;
+    size_t header_len = 0;
     size_t expected_content_length = 0;
     http_request_t req;
     memset(&req, 0, sizeof(req));
 
     while (g_running) {
+        if (!headers_parsed) {
+            const char *end_header = strstr(buf, "\r\n\r\n");
+            size_t delim_len = 4;
+            if (!end_header) {
+                end_header = strstr(buf, "\n\n");
+                delim_len = 2;
+            }
+
+            if (end_header) {
+                header_len = (size_t)(end_header - buf) + delim_len;
+                if (http_parse_request(buf, buf_len, &req) == 0) {
+                    headers_parsed = 1;
+                    expected_content_length = req.content_length;
+
+                    /* Fast pre-allocation for large payload */
+                    if (expected_content_length > 0) {
+                        size_t total_needed = header_len + expected_content_length + 4096;
+                        if (total_needed > buf_capacity && total_needed <= 536870912) {
+                            char *fast_buf = realloc(buf, total_needed);
+                            if (fast_buf) {
+                                buf = fast_buf;
+                                buf_capacity = total_needed;
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (headers_parsed) {
+            size_t current_body_len = (buf_len >= header_len) ? (buf_len - header_len) : 0;
+            if (current_body_len >= expected_content_length) {
+                break;
+            }
+        }
+
         if (buf_len + 4096 >= buf_capacity) {
-            if (buf_capacity >= 67108864) {
+            if (buf_capacity >= 536870912) { /* 512 MB max upload */
                 break;
             }
             buf_capacity *= 2;
@@ -93,26 +136,6 @@ static void *client_worker(void *arg) {
         if (n <= 0) break;
         buf_len += n;
         buf[buf_len] = '\0';
-
-        if (!headers_parsed) {
-            const char *end_header = strstr(buf, "\r\n\r\n");
-            if (!end_header) end_header = strstr(buf, "\n\n");
-
-            if (end_header) {
-                if (http_parse_request(buf, buf_len, &req) == 0) {
-                    headers_parsed = 1;
-                    expected_content_length = req.content_length;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        if (headers_parsed) {
-            if (req.body_len >= expected_content_length) {
-                break;
-            }
-        }
     }
 
     if (headers_parsed) {
@@ -173,6 +196,7 @@ static void *client_worker(void *arg) {
 }
 
 int server_start(server_ctx_t *ctx) {
+    g_active_ctx = ctx;
     platform_init_network();
 
     g_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -260,4 +284,54 @@ void server_stop(void) {
         CLOSE_SOCK(g_listen_fd);
         g_listen_fd = -1;
     }
+}
+
+server_ctx_t *server_get_active_ctx(void) {
+    return g_active_ctx;
+}
+
+int server_change_port(server_ctx_t *ctx, int new_port) {
+    if (!ctx || new_port <= 0 || new_port > 65535) return -1;
+    if (new_port == ctx->port) return 0;
+
+    socket_t new_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!IS_VALID_SOCK(new_listen_fd)) return -1;
+
+    int opt = 1;
+    setsockopt(new_listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+    struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    serv_addr.sin_port = htons((uint16_t)new_port);
+
+    if (bind(new_listen_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        CLOSE_SOCK(new_listen_fd);
+        return -1;
+    }
+
+    if (listen(new_listen_fd, 256) < 0) {
+        CLOSE_SOCK(new_listen_fd);
+        return -1;
+    }
+
+    socket_t old_fd = g_listen_fd;
+    g_listen_fd = new_listen_fd;
+    ctx->port = new_port;
+    if (IS_VALID_SOCK(old_fd)) {
+        CLOSE_SOCK(old_fd);
+    }
+
+    log_msg("INFO", "Server port successfully changed to %d (Active listening)", new_port);
+    return 0;
+}
+
+int server_set_storage_path(server_ctx_t *ctx, const char *new_path) {
+    if (!ctx || !new_path || strlen(new_path) == 0) return -1;
+    strncpy(ctx->updates_dir, new_path, sizeof(ctx->updates_dir) - 1);
+    ctx->updates_dir[sizeof(ctx->updates_dir) - 1] = '\0';
+    MKDIR(ctx->updates_dir);
+    log_msg("INFO", "Storage directory successfully changed to: %s", ctx->updates_dir);
+    return 0;
 }

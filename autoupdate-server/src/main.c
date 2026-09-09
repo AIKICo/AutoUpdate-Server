@@ -1,6 +1,7 @@
 #include "server.h"
 #include "utils.h"
 #include "compat.h"
+#include "db.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@
     #include <sys/stat.h>
 #endif
 
-#define DEFAULT_PORT 8080
+#define DEFAULT_PORT 8000
 #define PID_FILE "autoupdate.pid"
 #define LOG_FILE "autoupdate.log"
 
@@ -242,6 +243,18 @@ int main(int argc, char *argv[]) {
     }
 
     log_init(log_file);
+    db_init("autoupdate.db");
+
+    /* Load saved port and updates_dir from SQLite if not overridden by CLI */
+    if (port == DEFAULT_PORT) {
+        port = db_config_get_int("port", DEFAULT_PORT);
+    }
+    if (strcmp(updates_dir, "./updates") == 0) {
+        db_config_get("updates_dir", updates_dir, sizeof(updates_dir), "./updates");
+    }
+
+    MKDIR(updates_dir);
+    MKDIR(webroot_dir);
 
     server_ctx_t ctx;
     server_init(&ctx, port, updates_dir, webroot_dir, admin_user, admin_pass);
@@ -249,6 +262,7 @@ int main(int argc, char *argv[]) {
     int res = server_start(&ctx);
 
     unlink(PID_FILE);
+    db_close();
     log_close();
     return res;
 }

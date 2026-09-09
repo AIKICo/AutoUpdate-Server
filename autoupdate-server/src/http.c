@@ -79,6 +79,10 @@ int http_parse_request(const char *raw_req, size_t raw_len, http_request_t *req)
                 strncpy(req->content_type, val, sizeof(req->content_type) - 1);
             } else if (strcasecmp(hbuf, "Content-Length") == 0) {
                 req->content_length = (size_t)strtoull(val, NULL, 10);
+            } else if (strcasecmp(hbuf, "Host") == 0) {
+                strncpy(req->host_header, val, sizeof(req->host_header) - 1);
+            } else if (strcasecmp(hbuf, "Cookie") == 0) {
+                strncpy(req->cookie_header, val, sizeof(req->cookie_header) - 1);
             }
         }
         p = next_line + 2;
@@ -264,7 +268,7 @@ int http_send_file(socket_t sock, const char *filepath, const char *range_header
     uint64_t remaining = content_len;
     while (remaining > 0) {
         size_t to_read = remaining > sizeof(buf) ? sizeof(buf) : (size_t)remaining;
-        ssize_t r = read(fd, buf, to_read);
+        ssize_t r = read(fd, buf, (unsigned int)to_read);
         if (r <= 0) break;
         ssize_t w = SOCK_WRITE(sock, buf, r);
         if (w <= 0) break;
@@ -275,4 +279,34 @@ int http_send_file(socket_t sock, const char *filepath, const char *range_header
 
     close(fd);
     return 0;
+}
+
+int http_get_cookie(const http_request_t *req, const char *cookie_name, char *out_val, size_t out_len) {
+    if (!req || !cookie_name || !out_val || out_len == 0) return -1;
+    out_val[0] = '\0';
+    if (req->cookie_header[0] == '\0') return -1;
+
+    size_t name_len = strlen(cookie_name);
+    const char *p = req->cookie_header;
+
+    while (*p) {
+        while (*p == ' ' || *p == ';') p++;
+        if (!*p) break;
+
+        if (strncmp(p, cookie_name, name_len) == 0 && p[name_len] == '=') {
+            const char *val_start = p + name_len + 1;
+            const char *val_end = val_start;
+            while (*val_end && *val_end != ';') val_end++;
+
+            size_t vlen = (size_t)(val_end - val_start);
+            if (vlen >= out_len) vlen = out_len - 1;
+            memcpy(out_val, val_start, vlen);
+            out_val[vlen] = '\0';
+            return 0;
+        }
+
+        while (*p && *p != ';') p++;
+    }
+
+    return -1;
 }

@@ -7,9 +7,8 @@
 #include <stdarg.h>
 #include <time.h>
 #include <ctype.h>
-#include <pthread.h>
-
 #ifndef _WIN32
+#include <pthread.h>
 #include <sys/time.h>
 #endif
 

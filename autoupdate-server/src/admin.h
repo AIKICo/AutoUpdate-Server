@@ -18,8 +18,23 @@ typedef struct {
     int      port;
 } server_ctx_t;
 
+typedef struct {
+    char     exe_name[256];
+    uint64_t file_size;
+    char     architecture[64];
+    char     subsystem[64];
+    char     runtime[64];
+    char     file_version[64];
+    char     product_version[64];
+    char     file_description[128];
+    char     company_name[128];
+    char     detection_method[128];
+    char     summary[512];
+} pe_details_t;
+
 int admin_is_authorized(const http_request_t *req, const server_ctx_t *ctx);
 int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t *ctx);
+int inspect_pe_executable(const char *filepath, pe_details_t *details);
 const char *admin_get_embedded_html(void);
 
 #endif /* ADMIN_H */
