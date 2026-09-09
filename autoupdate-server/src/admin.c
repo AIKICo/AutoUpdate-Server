@@ -198,14 +198,31 @@ const char *admin_get_embedded_html(void) {
            "\n"
            "<div class=\"section\">\n"
            "  <h2>📁 Files in Current Folder</h2>\n"
-           "  <div style=\"margin-bottom: 12px; display:flex; gap:10px; flex-wrap:wrap;\">\n"
-           "    <input type=\"file\" id=\"uploadFile\" style=\"max-width:400px;\">\n"
-           "    <button type=\"button\" onclick=\"uploadSelectedFile()\">⬆️ Upload File</button>\n"
+           "  <input type=\"file\" id=\"tableReplaceInput\" style=\"display:none;\" onchange=\"executeTableFileReplace(event)\">\n"
+           "  <div style=\"margin-bottom: 12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;\">\n"
+           "    <input type=\"file\" id=\"uploadFile\" style=\"max-width:320px;\">\n"
+           "    <select id=\"uploadTargetOverride\" style=\"max-width:240px;\"><option value=\"\">-- Upload as New File --</option></select>\n"
+           "    <button type=\"button\" onclick=\"uploadSelectedFile()\">⬆️ Upload / Replace</button>\n"
            "  </div>\n"
            "  <table id=\"filesTable\">\n"
            "    <thead><tr><th>File Name</th><th>Folder</th><th>Size</th><th>SHA-256 Checksum</th><th>Download</th><th>Action</th></tr></thead>\n"
            "    <tbody><tr><td colspan=\"6\" style=\"text-align:center;\">Loading...</td></tr></tbody>\n"
            "  </table>\n"
+           "</div>\n"
+           "\n"
+           "<div class=\"section\" id=\"editorSection\">\n"
+           "  <h2>📝 AutoUpdater.xml &amp; Config Editor</h2>\n"
+           "  <div style=\"display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap; align-items:center;\">\n"
+           "    <select id=\"editorTargetFile\" onchange=\"loadEditorFile()\">\n"
+           "      <option value=\"AutoUpdater.xml\">AutoUpdater.xml</option>\n"
+           "      <option value=\"AutoUpdater.json\">AutoUpdater.json</option>\n"
+           "      <option value=\"changelog.html\">changelog.html</option>\n"
+           "    </select>\n"
+           "    <button type=\"button\" class=\"btn-secondary\" onclick=\"loadEditorFile()\">📥 Load Content</button>\n"
+           "    <button type=\"button\" class=\"btn-secondary\" onclick=\"saveEditorFile()\">💾 Save Changes</button>\n"
+           "    <span id=\"editorStatus\" style=\"font-size:0.85rem; color:#94a3b8;\"></span>\n"
+           "  </div>\n"
+           "  <textarea id=\"fileEditorText\" style=\"width:100%; min-height:240px; background:#080c14; color:#38bdf8; font-family:Consolas,monospace; font-size:0.9rem; padding:12px; border:1px solid #334155; border-radius:6px;\" placeholder=\"AutoUpdater.xml content will appear here...\"></textarea>\n"
            "</div>\n"
            "\n"
            "<div class=\"section\">\n"
@@ -215,6 +232,44 @@ const char *admin_get_embedded_html(void) {
            "</div>\n"
            "\n"
            "<script>\n"
+           "let targetReplaceApp = '', targetReplaceName = '';\n"
+           "function promptReplaceFile(app, name) { targetReplaceApp = app; targetReplaceName = name; const inp = document.getElementById('tableReplaceInput'); inp.value=''; inp.click(); }\n"
+           "function executeTableFileReplace(e) {\n"
+           "  const fi = e.target; if (!fi.files || !fi.files[0]) return;\n"
+           "  if (!confirm(`Replace ${targetReplaceName} with ${fi.files[0].name}? Existing file will be overwritten.`)) { fi.value=''; return; }\n"
+           "  fetch('/api/upload?app=' + encodeURIComponent(targetReplaceApp) + '&name=' + encodeURIComponent(targetReplaceName), { method:'POST', body:fi.files[0] })\n"
+           "  .then(r=>r.json()).then(res=>{\n"
+           "    alert(`File replaced successfully!\\nSHA-256: ${res.sha256}`);\n"
+           "    loadFiles(); fi.value='';\n"
+           "    if (confirm('Update AutoUpdater.xml with this checksum?')) autoUpdateXmlChecksum(targetReplaceApp, res.sha256);\n"
+           "  }).catch(e=>alert(e));\n"
+           "}\n"
+           "function autoUpdateXmlChecksum(app, sha) {\n"
+           "  fetch('/api/get_file_content?app=' + encodeURIComponent(app) + '&name=AutoUpdater.xml')\n"
+           "  .then(r=>r.text()).then(xml=>{\n"
+           "    let updated = xml.replace(/<checksum\\b[^>]*>.*?<\\/checksum>/is, `<checksum algorithm=\"SHA256\">${sha}</checksum>`);\n"
+           "    return fetch('/api/save_file_content?app=' + encodeURIComponent(app) + '&name=AutoUpdater.xml', { method:'POST', body:updated });\n"
+           "  }).then(()=>{ alert('AutoUpdater.xml checksum updated!'); loadEditorFile(); }).catch(e=>alert(e));\n"
+           "}\n"
+           "function openInEditor(app, name) {\n"
+           "  const sel = document.getElementById('editorTargetFile');\n"
+           "  let f=false; for(let i=0;i<sel.options.length;i++) if(sel.options[i].value===name) f=true;\n"
+           "  if(!f) { const opt=document.createElement('option'); opt.value=name; opt.text=name; sel.add(opt); }\n"
+           "  sel.value = name; loadEditorFile(); document.getElementById('editorSection').scrollIntoView();\n"
+           "}\n"
+           "function loadEditorFile() {\n"
+           "  const app = document.getElementById('currentApp').value, name = document.getElementById('editorTargetFile').value;\n"
+           "  const st = document.getElementById('editorStatus'); st.innerText = 'Loading...';\n"
+           "  fetch('/api/get_file_content?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(name))\n"
+           "  .then(r=>r.ok?r.text():'').then(txt=>{ document.getElementById('fileEditorText').value = txt; st.innerText = `Loaded (${txt.length} bytes)`; })\n"
+           "  .catch(()=>{ st.innerText = 'File not found'; });\n"
+           "}\n"
+           "function saveEditorFile() {\n"
+           "  const app = document.getElementById('currentApp').value, name = document.getElementById('editorTargetFile').value;\n"
+           "  const body = document.getElementById('fileEditorText').value;\n"
+           "  fetch('/api/save_file_content?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(name), { method:'POST', body:body })\n"
+           "  .then(r=>r.json()).then(res=>{ alert(res.message || 'Saved'); loadFiles(); }).catch(e=>alert(e));\n"
+           "}\n"
            "function updateStats() {\n"
            "  fetch('/api/stats').then(r=>r.json()).then(d=>{\n"
            "    const sec = d.uptime_sec, h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;\n"
@@ -248,27 +303,35 @@ const char *admin_get_embedded_html(void) {
            "  const app = document.getElementById('currentApp').value;\n"
            "  document.getElementById('appName').value = app || 'MyApplication';\n"
            "  loadFiles();\n"
+           "  loadEditorFile();\n"
            "  updateCSharpCode();\n"
            "}\n"
            "\n"
            "function loadFiles() {\n"
            "  const app = document.getElementById('currentApp').value;\n"
            "  fetch('/api/files?app=' + encodeURIComponent(app)).then(r=>r.json()).then(files=>{\n"
+           "    const ov = document.getElementById('uploadTargetOverride');\n"
+           "    if(ov) ov.innerHTML = '<option value=\"\">-- Upload as New File --</option>' + files.map(f=>`<option value=\"${f.name}\">Replace: ${f.name}</option>`).join('');\n"
            "    const tbody = document.querySelector('#filesTable tbody');\n"
            "    if (!files || files.length === 0) {\n"
            "      tbody.innerHTML = '<tr><td colspan=\"6\" style=\"text-align:center;\">No files found in this folder.</td></tr>';\n"
            "      return;\n"
            "    }\n"
-           "    tbody.innerHTML = files.map(f => `\n"
-           "      <tr>\n"
+           "    tbody.innerHTML = files.map(f => {\n"
+           "      const isText = f.name.endsWith('.xml')||f.name.endsWith('.json')||f.name.endsWith('.html');\n"
+           "      return `<tr>\n"
            "        <td><strong>${f.name}</strong></td>\n"
            "        <td><code>${f.app ? f.app : 'Root'}</code></td>\n"
            "        <td>${f.size_str}</td>\n"
            "        <td><code title=\"${f.sha256}\">${f.sha256.substring(0,16)}...</code> <button class=\"btn-secondary\" onclick=\"useHash('${f.name}','${f.sha256}')\">Select</button></td>\n"
            "        <td><a href=\"${f.url}\" target=\"_blank\" style=\"color:var(--accent);\">Download</a></td>\n"
-           "        <td><button class=\"btn-danger\" onclick=\"deleteFile('${f.app}','${f.name}')\">Delete</button></td>\n"
-           "      </tr>\n"
-           "    `).join('');\n"
+           "        <td>\n"
+           "          <button class=\"btn-secondary\" onclick=\"promptReplaceFile('${f.app}','${f.name}')\" style=\"background:#d97706;\">🔁 Replace</button>\n"
+           "          ${isText ? `<button class=\"btn-secondary\" onclick=\"openInEditor('${f.app}','${f.name}')\">✏️ Edit</button>` : ''}\n"
+           "          <button class=\"btn-danger\" onclick=\"deleteFile('${f.app}','${f.name}')\">Delete</button>\n"
+           "        </td>\n"
+           "      </tr>`;\n"
+           "    }).join('');\n"
            "  }).catch(()=>{});\n"
            "}\n"
            "\n"
@@ -282,12 +345,15 @@ const char *admin_get_embedded_html(void) {
            "  if (!fi.files || !fi.files[0]) { alert('Please select a file first.'); return; }\n"
            "  const app = document.getElementById('currentApp').value;\n"
            "  const f = fi.files[0];\n"
-           "  const url = '/api/upload?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(f.name);\n"
+           "  const ov = document.getElementById('uploadTargetOverride').value;\n"
+           "  const name = ov ? ov : f.name;\n"
+           "  const url = '/api/upload?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(name);\n"
            "  fetch(url, { method: 'POST', body: f }).then(r=>r.json()).then(res=>{\n"
-           "    alert('Upload successful: ' + res.filename);\n"
+           "    alert('Upload/Replace successful: ' + res.filename);\n"
            "    useHash(res.filename, res.sha256);\n"
            "    loadFiles();\n"
            "    fi.value = '';\n"
+           "    if (confirm('Update AutoUpdater.xml with this checksum?')) autoUpdateXmlChecksum(app, res.sha256);\n"
            "  }).catch(e=>alert('Upload error: ' + e));\n"
            "}\n"
            "\n"
@@ -307,6 +373,7 @@ const char *admin_get_embedded_html(void) {
            "  .then(r=>r.json()).then(res=>{\n"
            "    alert(res.message || 'Configurations saved successfully.');\n"
            "    loadFiles();\n"
+           "    loadEditorFile();\n"
            "  }).catch(e=>alert('Error: ' + e));\n"
            "}\n"
            "\n"
@@ -669,6 +736,7 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
 
         char dest_path[1024];
         snprintf(dest_path, sizeof(dest_path), "%s/%s", dest_dir, filename);
+        int already_existed = (access(dest_path, 0) == 0);
 
         FILE *f = fopen(dest_path, "wb");
         if (!f) {
@@ -685,11 +753,13 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         sha256_file(dest_path, sha256_hex);
         md5_file(dest_path, md5_hex);
 
-        log_msg("INFO", "File uploaded into [%s]: %s (%zu bytes) SHA256: %s",
+        log_msg("INFO", "File %s [%s]: %s (%zu bytes) SHA256: %s",
+                already_existed ? "replaced" : "uploaded",
                 strlen(app_name) > 0 ? app_name : "Root", filename, req->body_len, sha256_hex);
 
         char resp[512];
-        snprintf(resp, sizeof(resp), "{\"success\": true, \"app\": \"%s\", \"filename\": \"%s\", \"size\": %zu, \"sha256\": \"%s\", \"md5\": \"%s\"}\n",
+        snprintf(resp, sizeof(resp), "{\"success\": true, \"replaced\": %s, \"app\": \"%s\", \"filename\": \"%s\", \"size\": %zu, \"sha256\": \"%s\", \"md5\": \"%s\"}\n",
+                 already_existed ? "true" : "false",
                  app_name, filename, req->body_len, sha256_hex, md5_hex);
         return http_send_json(sock, 200, resp);
     }
@@ -721,6 +791,94 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
 
         log_msg("INFO", "File deleted: %s", target_path);
         return http_send_json(sock, 200, "{\"success\": true, \"message\": \"File deleted successfully.\"}\n");
+    }
+
+    /* 10. API: Get File Content (for in-browser XML/JSON/HTML editing) */
+    if (strcmp(req->path, "/api/get_file_content") == 0) {
+        if (!admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+
+        char app_name[128] = {0};
+        char filename[128] = {0};
+        get_query_param(req->query, "app", app_name, sizeof(app_name));
+        get_query_param(req->query, "name", filename, sizeof(filename));
+
+        if (strlen(filename) == 0) {
+            strncpy(filename, "AutoUpdater.xml", sizeof(filename) - 1);
+        }
+
+        if (!sanitize_name(filename) || (strlen(app_name) > 0 && !sanitize_name(app_name))) {
+            return http_send_error(sock, 400, "Invalid file or application name");
+        }
+
+        char fpath[1024];
+        if (strlen(app_name) > 0) {
+            snprintf(fpath, sizeof(fpath), "%s/%s/%s", ctx->updates_dir, app_name, filename);
+        } else {
+            snprintf(fpath, sizeof(fpath), "%s/%s", ctx->updates_dir, filename);
+        }
+
+        size_t file_sz = 0;
+        char *content = read_entire_file(fpath, &file_sz);
+        if (!content) {
+            return http_send_error(sock, 404, "File not found");
+        }
+
+        const char *content_type = "text/plain; charset=utf-8";
+        if (strstr(filename, ".xml")) content_type = "application/xml; charset=utf-8";
+        else if (strstr(filename, ".json")) content_type = "application/json; charset=utf-8";
+        else if (strstr(filename, ".html")) content_type = "text/html; charset=utf-8";
+
+        http_send_response(sock, 200, "OK", content_type, NULL, content, file_sz);
+        free(content);
+        return 0;
+    }
+
+    /* 11. API: Save File Content (for in-browser XML/JSON/HTML editing) */
+    if (strcmp(req->path, "/api/save_file_content") == 0 && req->method == HTTP_METHOD_POST) {
+        if (!admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+
+        char app_name[128] = {0};
+        char filename[128] = {0};
+        get_query_param(req->query, "app", app_name, sizeof(app_name));
+        get_query_param(req->query, "name", filename, sizeof(filename));
+
+        if (strlen(filename) == 0) {
+            strncpy(filename, "AutoUpdater.xml", sizeof(filename) - 1);
+        }
+
+        if (!sanitize_name(filename) || (strlen(app_name) > 0 && !sanitize_name(app_name))) {
+            return http_send_error(sock, 400, "Invalid file or application name");
+        }
+
+        char target_dir[1024];
+        if (strlen(app_name) > 0) {
+            snprintf(target_dir, sizeof(target_dir), "%s/%s", ctx->updates_dir, app_name);
+            MKDIR(target_dir);
+        } else {
+            strncpy(target_dir, ctx->updates_dir, sizeof(target_dir) - 1);
+        }
+
+        char fpath[1024];
+        snprintf(fpath, sizeof(fpath), "%s/%s", target_dir, filename);
+
+        FILE *f = fopen(fpath, "wb");
+        if (!f) {
+            return http_send_error(sock, 500, "Cannot write file to disk");
+        }
+
+        if (req->body && req->body_len > 0) {
+            fwrite(req->body, 1, req->body_len, f);
+        }
+        fclose(f);
+
+        log_msg("INFO", "Saved file content: %s (%zu bytes)", fpath, req->body_len);
+        return http_send_json(sock, 200, "{\"success\": true, \"message\": \"File saved successfully.\"}\n");
     }
 
     return -1;

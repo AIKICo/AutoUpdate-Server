@@ -271,6 +271,54 @@
     }
     .btn-danger:hover { background: #dc2626; box-shadow: none; }
 
+    .btn-warning {
+      background: #d97706;
+      color: #fff;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+    .btn-warning:hover { background: #b45309; }
+
+    .btn-info {
+      background: #0284c7;
+      color: #fff;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+    .btn-info:hover { background: #0369a1; }
+
+    .code-editor {
+      width: 100%;
+      min-height: 280px;
+      background: #080c14;
+      color: #38bdf8;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      resize: vertical;
+      tab-size: 2;
+    }
+    .code-editor:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .editor-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .editor-status {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -471,11 +519,20 @@
         <h2>📁 Package Repository (<span id="folderTitle">Root</span>)</h2>
       </div>
 
-      <div style="margin-bottom: 18px;">
-        <label>Upload installer package file (.zip, .exe, .msi, .xml):</label>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
-          <input type="file" id="uploadFile" style="max-width: 450px;">
-          <button type="button" onclick="uploadSelectedFile()">⬆️ Upload to This Folder &amp; Auto-Compute Hash</button>
+      <!-- Hidden file input for table Replace buttons -->
+      <input type="file" id="tableReplaceInput" style="display:none;" onchange="executeTableFileReplace(event)">
+
+      <div style="margin-bottom: 18px; background: #131c31; border: 1px solid var(--border); padding: 16px; border-radius: 8px;">
+        <label style="font-weight: 600; color: #fff; margin-bottom: 8px;">Upload or Replace Package File:</label>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <input type="file" id="uploadFile" style="max-width: 360px;">
+          <select id="uploadTargetOverride" style="max-width: 250px;">
+            <option value="">-- Upload as New File Name --</option>
+          </select>
+          <button type="button" onclick="uploadSelectedFile()">⬆️ Upload / Replace</button>
+        </div>
+        <div style="margin-top: 8px; font-size: 0.82rem; color: var(--text-muted);">
+          💡 <em>To replace an existing release file, select it in the dropdown above or click the <strong>🔁 Replace</strong> button next to it in the table below. The file will be overwritten and its SHA-256 hash will be updated automatically.</em>
         </div>
       </div>
 
@@ -500,6 +557,34 @@
         <div class="links-group" id="linksGroup">
           <!-- Dynamic links injected here -->
         </div>
+      </div>
+    </div>
+
+    <!-- Live File & AutoUpdater.xml Editor Section -->
+    <div class="section" id="editorSection">
+      <div class="section-header">
+        <h2>📝 In-Browser File Editor (AutoUpdater.xml, JSON, Changelog)</h2>
+        <span class="editor-status" id="editorStatus">Select a file and click "Load Content"</span>
+      </div>
+      <div class="editor-toolbar">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <label style="margin:0; font-weight:600;">File to Edit:</label>
+          <select id="editorTargetFile" onchange="onEditorFileSelect()" style="min-width: 200px;">
+            <option value="AutoUpdater.xml">AutoUpdater.xml</option>
+            <option value="AutoUpdater.json">AutoUpdater.json</option>
+            <option value="changelog.html">changelog.html</option>
+          </select>
+          <button type="button" class="btn-secondary" onclick="loadEditorFile()">📥 Load Content</button>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button type="button" class="btn-secondary" onclick="formatEditorXml()">✨ Format XML</button>
+          <button type="button" class="btn-info" onclick="saveEditorFile()">💾 Save Changes to Server</button>
+        </div>
+      </div>
+      <textarea id="fileEditorText" class="code-editor" placeholder="Click 'Load Content' above or 'Edit' on any file in the table to view and edit its content here..." spellcheck="false"></textarea>
+      <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:0.83rem; color:var(--text-muted); flex-wrap:wrap; gap:8px;">
+        <span>Folder: <strong id="editorFolderDisplay" style="color:var(--accent);">Root</strong></span>
+        <span>Directly edit XML/JSON version tags, download URLs, release notes, and mandatory flags.</span>
       </div>
     </div>
 
@@ -599,7 +684,9 @@
 
       updateLinksGroup();
       updateCSharpCode();
+      document.getElementById('editorFolderDisplay').innerText = app || 'Root';
       loadFiles();
+      loadEditorFile();
     }
 
     function updateLinksGroup() {
@@ -613,6 +700,193 @@
       `;
     }
 
+    let targetReplaceApp = '';
+    let targetReplaceName = '';
+
+    function promptReplaceFile(app, fileName) {
+      targetReplaceApp = app;
+      targetReplaceName = fileName;
+      const input = document.getElementById('tableReplaceInput');
+      input.value = '';
+      input.click();
+    }
+
+    function executeTableFileReplace(event) {
+      const fileInput = event.target;
+      if (!fileInput.files || fileInput.files.length === 0) return;
+      const file = fileInput.files[0];
+      
+      const appName = targetReplaceApp;
+      const targetName = targetReplaceName;
+
+      if (!confirm(`Are you sure you want to replace "${targetName}" with new file "${file.name}" in folder "${appName || 'Root'}"?\n\nThe existing file will be overwritten and its SHA-256 will be updated.`)) {
+        fileInput.value = '';
+        return;
+      }
+
+      const url = '/api/upload?app=' + encodeURIComponent(appName) + '&name=' + encodeURIComponent(targetName);
+      
+      fetch(url, {
+        method: 'POST',
+        body: file
+      })
+      .then(res => res.json())
+      .then(res => {
+        alert(`File "${res.filename}" was successfully replaced!\n\nNew SHA-256:\n${res.sha256}`);
+        useHash(res.filename, res.sha256);
+        loadFiles();
+        fileInput.value = '';
+
+        if (confirm(`Do you want to automatically update the SHA-256 checksum in "AutoUpdater.xml" to match this replaced file?`)) {
+          autoUpdateXmlChecksum(appName, res.sha256);
+        }
+      })
+      .catch(err => {
+        alert('Error replacing file: ' + err);
+        fileInput.value = '';
+      });
+    }
+
+    function autoUpdateXmlChecksum(app, newSha256) {
+      fetch('/api/get_file_content?app=' + encodeURIComponent(app) + '&name=AutoUpdater.xml')
+        .then(r => {
+          if (!r.ok) throw new Error('AutoUpdater.xml not found in this folder');
+          return r.text();
+        })
+        .then(xml => {
+          let updated = xml;
+          if (/<checksum\b[^>]*>.*?<\/checksum>/is.test(updated)) {
+            updated = updated.replace(/<checksum\b[^>]*>.*?<\/checksum>/is, `<checksum algorithm="SHA256">${newSha256}</checksum>`);
+          } else if (/<\/item>/i.test(updated)) {
+            updated = updated.replace(/<\/item>/i, `    <checksum algorithm="SHA256">${newSha256}</checksum>\n</item>`);
+          }
+          return fetch('/api/save_file_content?app=' + encodeURIComponent(app) + '&name=AutoUpdater.xml', {
+            method: 'POST',
+            body: updated
+          });
+        })
+        .then(r => r.json())
+        .then(res => {
+          alert('AutoUpdater.xml checksum was automatically updated to:\n' + newSha256);
+          if (document.getElementById('editorTargetFile').value === 'AutoUpdater.xml') {
+            loadEditorFile();
+          }
+        })
+        .catch(e => alert('Notice: ' + e.message));
+    }
+
+    function onEditorFileSelect() {
+      loadEditorFile();
+    }
+
+    function openInEditor(app, fileName) {
+      const sel = document.getElementById('editorTargetFile');
+      let found = false;
+      for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === fileName) { found = true; break; }
+      }
+      if (!found) {
+        const opt = document.createElement('option');
+        opt.value = fileName;
+        opt.text = fileName;
+        sel.add(opt);
+      }
+      sel.value = fileName;
+      document.getElementById('editorFolderDisplay').innerText = app || 'Root';
+      loadEditorFile();
+      document.getElementById('editorSection').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function loadEditorFile() {
+      const app = document.getElementById('currentApp').value;
+      const fileName = document.getElementById('editorTargetFile').value;
+      const statusEl = document.getElementById('editorStatus');
+      document.getElementById('editorFolderDisplay').innerText = app || 'Root';
+      statusEl.innerText = `Loading "${fileName}"...`;
+      statusEl.style.color = 'var(--text-muted)';
+
+      fetch('/api/get_file_content?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(fileName))
+        .then(res => {
+          if (!res.ok) throw new Error('File does not exist yet or cannot be read.');
+          return res.text();
+        })
+        .then(text => {
+          document.getElementById('fileEditorText').value = text;
+          statusEl.innerText = `Loaded "${fileName}" (${text.length} bytes) - Ready`;
+          statusEl.style.color = 'var(--success)';
+        })
+        .catch(err => {
+          document.getElementById('fileEditorText').value = '';
+          statusEl.innerText = `${err.message}`;
+          statusEl.style.color = 'var(--danger)';
+        });
+    }
+
+    function saveEditorFile() {
+      const app = document.getElementById('currentApp').value;
+      const fileName = document.getElementById('editorTargetFile').value;
+      const content = document.getElementById('fileEditorText').value;
+      const statusEl = document.getElementById('editorStatus');
+
+      if (!content || content.trim().length === 0) {
+        if (!confirm('The editor content is empty. Save empty file?')) return;
+      }
+
+      statusEl.innerText = `Saving "${fileName}"...`;
+      statusEl.style.color = 'var(--text-muted)';
+
+      fetch('/api/save_file_content?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(fileName), {
+        method: 'POST',
+        body: content
+      })
+        .then(res => res.json())
+        .then(res => {
+          statusEl.innerText = `Saved "${fileName}" successfully at ${new Date().toLocaleTimeString()}!`;
+          statusEl.style.color = 'var(--success)';
+          alert(res.message || 'File saved successfully.');
+          loadFiles();
+        })
+        .catch(err => {
+          statusEl.innerText = `Save failed: ${err}`;
+          statusEl.style.color = 'var(--danger)';
+          alert('Error saving file: ' + err);
+        });
+    }
+
+    function formatEditorXml() {
+      const textarea = document.getElementById('fileEditorText');
+      const xml = textarea.value;
+      if (!xml.trim().startsWith('<')) {
+        alert('Active content is not XML.');
+        return;
+      }
+      try {
+        let formatted = '';
+        let reg = /(>)(<)(\/*)/g;
+        let xmlPadded = xml.replace(reg, '$1\r\n$2$3');
+        let pad = 0;
+        xmlPadded.split('\r\n').forEach(node => {
+          let indent = 0;
+          if (node.match(/.+<\/\w[^>]*>$/)) {
+            indent = 0;
+          } else if (node.match(/^<\/\w/)) {
+            if (pad !== 0) pad -= 1;
+          } else if (node.match(/^<\w[^>]*[^\/]>.*$/)) {
+            indent = 1;
+          } else {
+            indent = 0;
+          }
+          let padding = '';
+          for (let i = 0; i < pad; i++) padding += '  ';
+          formatted += padding + node.trim() + '\r\n';
+          pad += indent;
+        });
+        textarea.value = formatted.trim();
+      } catch (e) {
+        alert('Could not format XML: ' + e);
+      }
+    }
+
     function loadFiles() {
       const app = document.getElementById('currentApp').value;
       const url = '/api/files?app=' + encodeURIComponent(app);
@@ -620,24 +894,38 @@
       fetch(url)
         .then(res => res.json())
         .then(files => {
+          // Populate target override dropdown
+          const overrideSel = document.getElementById('uploadTargetOverride');
+          overrideSel.innerHTML = '<option value="">-- Upload as New File Name --</option>' +
+            files.map(f => `<option value="${f.name}">Replace: ${f.name}</option>`).join('');
+
           const tbody = document.querySelector('#filesTable tbody');
           if (!files || files.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#94a3b8;">No update files found in <strong>${app || 'Root'}</strong>. Upload a package above.</td></tr>`;
             return;
           }
-          tbody.innerHTML = files.map(f => `
+          tbody.innerHTML = files.map(f => {
+            const isText = f.name.endsWith('.xml') || f.name.endsWith('.json') || f.name.endsWith('.html') || f.name.endsWith('.txt');
+            return `
             <tr>
               <td><strong>${f.name}</strong></td>
               <td><code>${f.app ? f.app : 'Root'}</code></td>
               <td>${f.size_str}</td>
               <td>
                 <span class="hash-badge" title="${f.sha256}">${f.sha256}</span>
-                <button class="btn-secondary" onclick="useHash('${f.name}', '${f.sha256}')" style="margin-left:6px;">Select Hash</button>
+                <button class="btn-secondary" onclick="useHash('${f.name}', '${f.sha256}')" style="margin-left:6px;" title="Select this hash in release generator">Select Hash</button>
               </td>
               <td><a href="${f.url}" target="_blank" style="color:var(--accent); text-decoration:none;">🔗 Download</a></td>
-              <td><button class="btn-danger" onclick="deleteFile('${f.app}', '${f.name}')">Delete</button></td>
+              <td>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                  <button type="button" class="btn-warning" onclick="promptReplaceFile('${f.app}', '${f.name}')" title="Replace / Overwrite this package file">🔁 Replace</button>
+                  ${isText ? `<button type="button" class="btn-info" onclick="openInEditor('${f.app}', '${f.name}')" title="Edit this file directly in the browser">✏️ Edit</button>` : ''}
+                  <button type="button" class="btn-danger" onclick="deleteFile('${f.app}', '${f.name}')" title="Delete file">🗑️ Delete</button>
+                </div>
+              </td>
             </tr>
-          `).join('');
+            `;
+          }).join('');
         })
         .catch(() => {});
     }
@@ -671,6 +959,9 @@
         alert(res.message || 'AutoUpdater.xml and AutoUpdater.json generated successfully.');
         loadApps();
         loadFiles();
+        if (document.getElementById('editorTargetFile').value === 'AutoUpdater.xml') {
+          loadEditorFile();
+        }
       })
       .catch(err => alert('Error generating configs: ' + err));
     }
@@ -683,7 +974,14 @@
       }
       const app = document.getElementById('currentApp').value;
       const file = fileInput.files[0];
-      const url = '/api/upload?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(file.name);
+      const overrideTarget = document.getElementById('uploadTargetOverride').value;
+      const targetFilename = overrideTarget ? overrideTarget : file.name;
+
+      if (overrideTarget && !confirm(`Confirm replacing existing file "${overrideTarget}" with "${file.name}"?`)) {
+        return;
+      }
+
+      const url = '/api/upload?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(targetFilename);
 
       const btn = event.target;
       const originalText = btn.innerText;
@@ -696,10 +994,16 @@
       })
       .then(res => res.json())
       .then(res => {
-        alert('File ' + res.filename + ' uploaded successfully to folder ' + (res.app || 'Root') + '.\nSHA-256: ' + res.sha256);
+        const actionStr = res.replaced ? 'replaced and updated' : 'uploaded';
+        alert(`File "${res.filename}" ${actionStr} successfully in folder "${res.app || 'Root'}".\n\nSHA-256:\n${res.sha256}`);
         useHash(res.filename, res.sha256);
         loadFiles();
         fileInput.value = '';
+        document.getElementById('uploadTargetOverride').value = '';
+
+        if (confirm(`Do you want to update "AutoUpdater.xml" with this checksum?`)) {
+          autoUpdateXmlChecksum(app, res.sha256);
+        }
       })
       .catch(err => alert('Upload failed: ' + err))
       .finally(() => {
