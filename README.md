@@ -1,70 +1,124 @@
-# بسته جامع وب‌سرورهای پرسرعت لینوکس بدون نیاز به نصب و اینترنت
-### ویژه به‌روزرسانی نرم‌افزارها با AutoUpdater.NET
+﻿# AutoUpdate-Server
+### High-Performance, Zero-Dependency Offline Web Server for AutoUpdater.NET
 
-این بسته به طور اختصاصی برای **سرورهای لینوکسی ایزوله (بدون اینترنت)** تهیه شده است که امکان نصب بسته از طریق `apt-get` یا `yum` را ندارند و نیازمند یک سرویس پرسرعت، امن، دارای قابلیت **Resume** و مدیریت در پس‌زمینه هستند.
+[![GitHub Organization](https://img.shields.io/badge/Organization-AIKICo-blue)](https://github.com/AIKICo)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64%20%7C%20Windows%20x64-orange)](https://github.com/AIKICo/AutoUpdate-Server)
+[![Build](https://img.shields.io/badge/Build-100%25%20Static%20Musl%20C-brightgreen)](https://github.com/AIKICo/AutoUpdate-Server)
 
-در این دایرکتوری دو راهکار کامل و آماده برای شما فراهم شده است:
-
----
-
-## ۱. راهکار پیشنهادی و جامع: `autoupdate-server`
-**یک وب‌سرور سبک و پرسرعت اختصاصی به زبان C با پنل مدیریت وب:**
-
-- **کامپایل ۱۰۰٪ استاتیک (Static ELF 64-bit):** بدون کوچک‌ترین وابستگی به پکیج‌ها یا نسخه‌های glibc سیستم‌عامل.
-- **پنل وب مدیریتی زیبا و آفلاین (`/admin/`):**
-  - فرم تولید خودکار فایل‌های کانفیگ `AutoUpdater.xml` و `AutoUpdater.json`.
-  - آپلود مستقیم فایل‌های نصبی (`.zip`, `.exe`, `.msi`) از طریق مرورگر.
-  - محاسبه خودکار هشدارهای سلامت فایل (SHA-256 و MD5).
-  - مدیریت و مشاهده فایل‌ها و مانیتورینگ زنده ترافیک سرور.
-- **پشتیبانی کامل از Resume (دانلود قطعه‌ای):** بر اساس استانداردهای HTTP Range و بازگرداندن وضعیت `206 Partial Content`.
-- **سرعت فوق‌العاده با Zero-Copy:** انتقال مستقیم فایل در سطح هسته لینوکس با فراخوان `sendfile(2)`.
-- **اجرای آسان در پس‌زمینه (Daemon):** همراه با اسکریپت‌های `start.sh`, `stop.sh`, `status.sh` و سرویس `systemd`.
-- **فایل فشرده آماده انتقال:** `autoupdate-server-linux-x64.tar.gz` (فقط ۴۳۸ کیلوبایت!).
+A dedicated, standalone HTTP web server written in pure C for air-gapped / offline Linux servers and local testing environments. Specifically designed to serve software updates to [.NET applications using AutoUpdater.NET](https://github.com/ravibpatel/AutoUpdater.NET).
 
 ---
 
-## ۲. راهکار استاندارد: `nginx-portable`
-**پکیج پرتابل و استاتیک رسمی Nginx (نسخه ۱.۲۶.۲ برای لینوکس ۶۴ بیتی):**
+## Key Features
 
-- **بدون نیاز به نصب:** فایل باینری استاتیک Nginx بدون وابستگی به هیچ کتابخانه اشتراکی.
-- **کانفیگ بهینه‌شده:** تنظیم شده برای ارسال فایل‌های حجیم با `sendfile on`, `tcp_nopush on`، هدرهای CORS و هدر `Accept-Ranges bytes`.
-- **اسکریپت‌های کنترل:** `start.sh`, `stop.sh`, `reload.sh`, `status.sh`.
-- **فایل فشرده آماده انتقال:** `nginx-portable-linux-x64.tar.gz` (حدود ۲.۵ مگابایت).
+- **100% Standalone & Statically Linked:** Pure C implementation compiled with `musl libc`. Zero runtime dependencies on `glibc`, system packages, or internet connectivity (`apt-get`/`yum` not required).
+- **Multi-Application Subfolder Support:** Dedicated directory for each software (e.g. `/Accounting/`, `/Warehouse/`, `/CRM/`, or `/Root/`).
+- **Modern English Web Management Dashboard (`/admin/`):**
+  - Intuitive GUI to create and manage application folders.
+  - Auto-generation of `AutoUpdater.xml` and `AutoUpdater.json` catalog files.
+  - Direct file upload for update packages (`.zip`, `.exe`, `.msi`).
+  - Automatic on-the-fly checksum computation (**SHA-256** and **MD5**).
+  - Built-in C# code snippet generator for client-side copy & paste.
+  - Real-time server statistics (uptime, request count, bandwidth).
+- **HTTP Resume & Partial Content:** Full HTTP `Range: bytes=start-end` support returning `206 Partial Content` and `Accept-Ranges: bytes` for seamless, resumable downloads.
+- **Ultra-Fast Zero-Copy Transfer:** Uses the Linux kernel `sendfile(2)` system call for high-throughput, low-CPU file delivery.
+- **Daemon & Background Ready:** Included `start.sh`, `stop.sh`, `status.sh`, and `autoupdater.service` for systemd integration.
+- **Cross-Platform:** Includes both Linux static x86_64 binary and Windows native `.exe` for quick local testing.
 
 ---
 
-## نحوه استفاده سریع در لینوکس آفلاین
+## Quick Start on Linux (Offline Server)
 
-### برای راهکار ۱ (AutoUpdate-Server با پنل وب):
+### 1. Extract Archive
+Transfer `autoupdate-server-linux-x64.tar.gz` to your offline Linux server via USB / SCP, then extract:
 ```bash
-# ۱. استخراج فایل فشرده در سرور:
 tar -xzf autoupdate-server-linux-x64.tar.gz
 cd autoupdate-server
-
-# ۲. اعطای مجوز اجرا:
-chmod +x ./bin/autoupdate-server start.sh stop.sh status.sh
-
-# ۳. راه‌اندازی در پس‌زمینه:
-./start.sh
-
-# ۴. ورود به پنل مدیریت:
-# http://<IP-SERVER>:8080/admin/
-# نام کاربری: admin
-# کلمه عبور: admin123
 ```
 
-### برای راهکار ۲ (Nginx پرتابل):
+### 2. Make Executables Runnable
 ```bash
-# ۱. استخراج فایل فشرده در سرور:
-tar -xzf nginx-portable-linux-x64.tar.gz
-cd nginx-portable
-
-# ۲. اعطای مجوز اجرا:
-chmod +x ./sbin/nginx start.sh stop.sh reload.sh status.sh
-
-# ۳. راه‌اندازی در پس‌زمینه:
-./start.sh
-
-# ۴. مشاهده در مرورگر:
-# http://<IP-SERVER>:8080/
+chmod +x ./bin/autoupdate-server start.sh stop.sh status.sh
 ```
+
+### 3. Start Server in Background
+```bash
+./start.sh
+```
+*To customize port or password:*
+```bash
+./start.sh -p 9000 -u admin -P myStrongPassword
+```
+
+### 4. Open Web Admin Dashboard
+Navigate to:
+```
+http://<YOUR-SERVER-IP>:8080/admin/
+Default Username: admin
+Default Password: admin123
+```
+
+---
+
+## Quick Start on Windows (Testing)
+Run `run_windows.bat` or execute directly:
+```cmd
+cd autoupdate-server
+bin\autoupdate-server.exe -p 8080 -d ./updates -w ./webroot
+```
+Open `http://localhost:8080/admin/` in your browser.
+
+---
+
+## AutoUpdater.NET Client Integration (C#)
+
+In your WPF, WinForms, or Console application:
+
+```csharp
+using AutoUpdaterDotNET;
+
+public void CheckForUpdates()
+{
+    // Point directly to your server's application catalog:
+    AutoUpdater.Start("http://your-server:8080/Accounting/AutoUpdater.xml");
+
+    // Or if you prefer JSON catalog:
+    // AutoUpdater.Start("http://your-server:8080/Accounting/AutoUpdater.json");
+}
+```
+
+---
+
+## Repository Contents
+
+```
+├── autoupdate-server/
+│   ├── src/                    # Pure C cross-platform source code
+│   │   ├── main.c              # Entry point & CLI argument parser
+│   │   ├── server.c            # Multithreaded socket listener
+│   │   ├── http.c              # HTTP parser & Range/206 engine
+│   │   ├── admin.c             # Admin dashboard & REST APIs
+│   │   ├── sha256.c & md5.c    # Cryptographic hash routines
+│   │   └── utils.c & compat.h  # OS abstraction (Linux/Windows)
+│   ├── bin/
+│   │   ├── autoupdate-server   # 100% Static Linux x86_64 ELF binary
+│   │   └── autoupdate-server.exe # Native Windows x64 test executable
+│   ├── webroot/admin/          # Modern English admin dashboard (HTML5/CSS3)
+│   ├── updates/                # Multi-app repository (Accounting, CRM, etc.)
+│   ├── start.sh / stop.sh      # Background management scripts
+│   └── autoupdater.service     # Linux systemd service template
+├── nginx-portable/             # Alternative: Static pre-compiled Nginx 1.26.2
+├── autoupdate-server-linux-x64.tar.gz # Ready-to-deploy archive (420 KB)
+└── autoupdate-server-linux-x64.zip    # Ready-to-deploy zip archive
+```
+
+---
+
+## راهنمای فارسی (Persian Summary)
+
+این پکیج به صورت اختصاصی برای سرورهای ایزوله لینوکسی که دسترسی به اینترنت ندارند و امکان نصب بسته با apt یا yum وجود ندارد طراحی شده است. 
+- نیازی به هیچ‌گونه نصب یا پکیج ندارد (کاملاً پرتابل و استاتیک).
+- از قابلیت ادامه دانلود (Resume / 206 Partial Content) به طور کامل پشتیبانی می‌کند.
+- دارای پنل وب انگلیسی مدیریت و آپلود فایل، ایجاد خودکار AutoUpdater.xml و محاسبه هش SHA256 است.
+- به ازای هر نرم‌افزار یک پوشه مجزا فراهم می‌کند (مانند `/Accounting/AutoUpdater.xml`).

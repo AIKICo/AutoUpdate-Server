@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>پنل مدیریت وب‌سرور چندنرم‌افزاره (AutoUpdater.NET Server)</title>
+  <title>AutoUpdate-Server - Management Dashboard</title>
   <style>
     :root {
       --bg: #0b0f19;
@@ -25,7 +25,7 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
     body {
@@ -54,13 +54,13 @@
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
     }
 
     .brand-icon {
       background: linear-gradient(135deg, #0284c7, #38bdf8);
-      width: 44px;
-      height: 44px;
+      width: 46px;
+      height: 46px;
       border-radius: 10px;
       display: flex;
       align-items: center;
@@ -70,9 +70,10 @@
     }
 
     h1 {
-      font-size: 1.4rem;
+      font-size: 1.45rem;
       font-weight: 700;
       color: #fff;
+      letter-spacing: -0.02em;
     }
 
     .subtitle {
@@ -142,6 +143,25 @@
       border-color: var(--accent);
     }
 
+    .features-banner {
+      background: rgba(19, 39, 66, 0.4);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 0.88rem;
+      color: #cbd5e1;
+    }
+
+    .features-banner span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -209,6 +229,14 @@
       grid-column: span 2;
     }
 
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
     button {
       background: var(--btn-primary);
       color: #fff;
@@ -247,7 +275,7 @@
       width: 100%;
       border-collapse: collapse;
       margin-top: 12px;
-      text-align: right;
+      text-align: left;
     }
 
     th, td {
@@ -273,9 +301,8 @@
       padding: 3px 8px;
       font-family: Consolas, monospace;
       font-size: 0.8rem;
-      direction: ltr;
       display: inline-block;
-      max-width: 150px;
+      max-width: 160px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -287,8 +314,6 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 16px;
-      direction: ltr;
-      text-align: left;
       font-family: Consolas, "Courier New", monospace;
       font-size: 0.9rem;
       color: #38bdf8;
@@ -311,7 +336,6 @@
       border-radius: 6px;
       text-decoration: none;
       font-size: 0.85rem;
-      direction: ltr;
       display: inline-flex;
       align-items: center;
       gap: 6px;
@@ -320,6 +344,14 @@
     .link-pill:hover {
       border-color: var(--accent);
       background: #24324f;
+    }
+
+    code {
+      background: #0f172a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+      font-size: 0.85rem;
     }
 
     @media (max-width: 768px) {
@@ -335,46 +367,52 @@
       <div class="brand">
         <div class="brand-icon">⚡</div>
         <div>
-          <h1>AutoUpdate-Server (توسعه‌یافته با C)</h1>
-          <div class="subtitle">مدیریت اختصاصی پوشه به‌روزرسانی برای هر نرم‌افزار ویژه AutoUpdater.NET</div>
+          <h1>AutoUpdate-Server</h1>
+          <div class="subtitle">High-Performance C Web Server & Release Manager for AutoUpdater.NET</div>
         </div>
       </div>
       <div class="status-badge">
         <div class="status-pulse"></div>
-        <span>سرور فعال و در حال سرویس‌دهی</span>
+        <span>Server Active &amp; Ready</span>
       </div>
     </header>
+
+    <div class="features-banner">
+      <span>🚀 <strong>HTTP Resume Support:</strong> Clients resume broken/large downloads using HTTP Range (206 Partial Content).</span>
+      <span>⚡ <strong>Zero-Copy Kernel sendfile:</strong> Maximum file throughput with minimal RAM usage (&lt;15 MB).</span>
+      <span>🛡️ <strong>Standalone Binary:</strong> Statically compiled with zero dependencies, runs offline on any Linux server.</span>
+    </div>
 
     <!-- Application Selection Toolbar -->
     <div class="app-toolbar">
       <div class="app-selector-group">
-        <label>📁 نرم‌افزار / پوشه جاری:</label>
+        <label>📁 Active Application / Folder:</label>
         <select id="currentApp" onchange="onAppChange()" style="min-width: 220px; font-weight: bold;">
-          <option value="">ریشه اصلی (Root)</option>
+          <option value="">Root (Default)</option>
         </select>
-        <button type="button" class="btn-secondary" onclick="promptNewApp()">➕ ایجاد پوشه نرم‌افزار جدید</button>
-        <button type="button" class="btn-danger" id="btnDeleteApp" onclick="deleteCurrentApp()" style="display:none;">🗑️ حذف این پوشه</button>
+        <button type="button" class="btn-secondary" onclick="promptNewApp()">➕ New Application Folder</button>
+        <button type="button" class="btn-danger" id="btnDeleteApp" onclick="deleteCurrentApp()" style="display:none;">🗑️ Delete Folder</button>
       </div>
       <div style="font-size: 0.85rem; color: #cbd5e1;">
-        <span>مسیر در وب: </span><code id="appWebPath" style="color:var(--accent); font-weight:bold;">/</code>
+        <span>Web URL Prefix: </span><code id="appWebPath" style="color:var(--accent); font-weight:bold;">/</code>
       </div>
     </div>
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-title">مدت زمان فعالیت (Uptime)</div>
+        <div class="stat-title">Server Uptime</div>
         <div class="stat-value" id="st-uptime">0h 0m</div>
       </div>
       <div class="stat-card">
-        <div class="stat-title">مجموع درخواست‌ها</div>
+        <div class="stat-title">Total Requests</div>
         <div class="stat-value" id="st-requests">0</div>
       </div>
       <div class="stat-card">
-        <div class="stat-title">حجم کل ترافیک دانلود شده</div>
+        <div class="stat-title">Total Bandwidth Served</div>
         <div class="stat-value" id="st-bytes">0 B</div>
       </div>
       <div class="stat-card">
-        <div class="stat-title">پورت فعال سرور</div>
+        <div class="stat-title">Active Listen Port</div>
         <div class="stat-value" id="st-port">:8080</div>
       </div>
     </div>
@@ -382,46 +420,46 @@
     <!-- Release Generator Section -->
     <div class="section">
       <div class="section-header">
-        <h2>📦 ایجاد نسخه جدید برای این نرم‌افزار (تولید AutoUpdater.xml / JSON)</h2>
+        <h2>📦 Publish New Release (AutoUpdater.xml &amp; AutoUpdater.json Generator)</h2>
       </div>
       <form id="genForm" onsubmit="generateConfig(event)">
         <div class="form-grid">
           <div>
-            <label>نام نرم‌افزار / پوشه اختصاصی:</label>
+            <label>Application / Folder Name:</label>
             <input type="text" id="appName" placeholder="e.g. Accounting" required>
           </div>
           <div>
-            <label>نسخه جدید انتشار (New Version):</label>
+            <label>New Version Number (e.g. 2.1.0.0):</label>
             <input type="text" id="appVer" value="2.0.0.0" placeholder="e.g. 2.1.0.0" required>
           </div>
           <div>
-            <label>نام فایل بسته نصبی (Setup.zip یا Setup.exe):</label>
-            <input type="text" id="fileUrl" placeholder="Setup.zip یا آدرس مستقیم" required>
+            <label>Package File Name or Direct Download URL:</label>
+            <input type="text" id="fileUrl" placeholder="e.g. Setup.zip or Setup.exe" required>
           </div>
           <div>
-            <label>الگوریتم اعتبارسنجی هش (Checksum):</label>
+            <label>Integrity Checksum Algorithm:</label>
             <select id="hashAlgo">
-              <option value="SHA256">SHA256 (پیشنهادی و امن‌ترین)</option>
+              <option value="SHA256">SHA256 (Recommended &amp; Secure)</option>
               <option value="MD5">MD5</option>
             </select>
           </div>
           <div class="col-span-2">
-            <label>مقدار هش Checksum: <span style="color:var(--text-muted); font-size:0.8rem;">(با زدن دکمه «انتخاب هش» در جدول پایین خودکار پر می‌شود)</span></label>
-            <input type="text" id="hashVal" placeholder="هش SHA-256 فایل نصبی">
+            <label>Checksum Hash: <span style="color:var(--text-muted); font-size:0.8rem;">(Click "Select Hash" on any file in the table below to auto-fill)</span></label>
+            <input type="text" id="hashVal" placeholder="Calculated SHA-256 or MD5 hash">
           </div>
           <div class="col-span-2">
-            <label>به‌روزرسانی اجباری (Mandatory Update):</label>
+            <label>Mandatory Update:</label>
             <select id="mandatory">
-              <option value="false">خیر - اختیاری (کاربر می‌تواند به‌روزرسانی را رد کند)</option>
-              <option value="true">بله - اجباری (کاربر موظف به نصب آپدیت است)</option>
+              <option value="false">No - Optional update (User may skip or remind later)</option>
+              <option value="true">Yes - Mandatory update (User must update before continuing)</option>
             </select>
           </div>
           <div class="col-span-2">
-            <label>توضیحات و یادداشت تغییرات (Changelog):</label>
-            <textarea id="changelog" rows="3">• بهبود سرعت و عملکرد&#10;• رفع اشکالات گزارش شده&#10;• قابلیت‌های جدید نگارش</textarea>
+            <label>Release Notes / Changelog:</label>
+            <textarea id="changelog" rows="3">• Performance improvements and bug fixes&#10;• Enhanced data synchronization&#10;• New reporting capabilities</textarea>
           </div>
           <div class="col-span-2">
-            <button type="submit">✨ تولید و ذخیره فوری کاتالوگ در این پوشه</button>
+            <button type="submit">✨ Generate &amp; Save AutoUpdater.xml and AutoUpdater.json</button>
           </div>
         </div>
       </form>
@@ -430,35 +468,35 @@
     <!-- Files Management Section -->
     <div class="section">
       <div class="section-header">
-        <h2>📁 فایل‌های پوشه جاری (<span id="folderTitle">Root</span>)</h2>
+        <h2>📁 Package Repository (<span id="folderTitle">Root</span>)</h2>
       </div>
 
       <div style="margin-bottom: 18px;">
-        <label>آپلود فایل نصبی جدید به این پوشه (.zip, .exe, .msi, .xml):</label>
+        <label>Upload installer package file (.zip, .exe, .msi, .xml):</label>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
           <input type="file" id="uploadFile" style="max-width: 450px;">
-          <button type="button" onclick="uploadSelectedFile()">⬆️ بارگذاری به این پوشه و محاسبه خودکار هش</button>
+          <button type="button" onclick="uploadSelectedFile()">⬆️ Upload to This Folder &amp; Auto-Compute Hash</button>
         </div>
       </div>
 
       <table id="filesTable">
         <thead>
           <tr>
-            <th>نام فایل</th>
-            <th>پوشه</th>
-            <th>حجم فایل</th>
-            <th>هش SHA-256</th>
-            <th>لینک مستقیم</th>
-            <th>عملیات</th>
+            <th>File Name</th>
+            <th>Folder</th>
+            <th>Size</th>
+            <th>SHA-256 Checksum</th>
+            <th>Direct Download</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="6" style="text-align:center;">در حال دریافت اطلاعات فایل‌ها...</td></tr>
+          <tr><td colspan="6" style="text-align:center;">Loading file listings...</td></tr>
         </tbody>
       </table>
 
       <div style="margin-top: 18px;">
-        <label>لینک‌های مستقیم این نرم‌افزار جهت تست یا استفاده در کلاینت:</label>
+        <label>Direct Catalog Endpoints for Client Apps:</label>
         <div class="links-group" id="linksGroup">
           <!-- Dynamic links injected here -->
         </div>
@@ -468,9 +506,9 @@
     <!-- Code Snippet Section -->
     <div class="section">
       <div class="section-header">
-        <h2>💻 راهنمای اتصال این نرم‌افزار در کد سی‌شارپ (C# / AutoUpdater.NET)</h2>
+        <h2>💻 C# Client Integration Guide (AutoUpdater.NET)</h2>
       </div>
-      <p style="color:var(--text-muted); font-size:0.9rem;">کد آماده زیر را در پروژه سی‌شارپ مربوط به این نرم‌افزار کپی کنید:</p>
+      <p style="color:var(--text-muted); font-size:0.9rem;">Copy this C# snippet directly into your application startup routine (e.g. Form_Load or App.xaml.cs):</p>
       <pre class="code-box"><code id="csharpCode"></code></pre>
     </div>
   </div>
@@ -501,7 +539,7 @@
         .then(apps => {
           const sel = document.getElementById('currentApp');
           const currentVal = sel.value;
-          sel.innerHTML = '<option value="">ریشه اصلی (Root)</option>' + 
+          sel.innerHTML = '<option value="">Root (Default)</option>' + 
             apps.map(a => `<option value="${a}">📁 ${a}</option>`).join('');
           
           if (apps.includes(currentVal)) {
@@ -513,13 +551,13 @@
     }
 
     function promptNewApp() {
-      const name = prompt('نام انگلیسی پوشه نرم‌افزار جدید را وارد فرمایید (مثال: Accounting, Warehouse, CRM, POS):');
+      const name = prompt('Enter a name for the new application folder (e.g. Accounting, Warehouse, CRM):');
       if (!name || !name.trim()) return;
       const cleanName = name.trim();
       fetch('/api/create_app?name=' + encodeURIComponent(cleanName), { method: 'POST' })
         .then(res => res.json())
         .then(res => {
-          alert(res.message || 'پوشه نرم‌افزار جدید ساخته شد.');
+          alert(res.message || 'Application folder created successfully.');
           fetch('/api/apps').then(r=>r.json()).then(apps => {
             loadApps();
             setTimeout(() => {
@@ -528,22 +566,22 @@
             }, 100);
           });
         })
-        .catch(err => alert('خطا: ' + err));
+        .catch(err => alert('Error: ' + err));
     }
 
     function deleteCurrentApp() {
       const app = document.getElementById('currentApp').value;
       if (!app) return;
-      if (!confirm('آیا از حذف پوشه ' + app + ' مطمئن هستید؟ (پوشه باید خالی باشد)')) return;
+      if (!confirm('Are you sure you want to delete the folder "' + app + '"? (Folder must be empty)')) return;
 
       fetch('/api/delete_app?name=' + encodeURIComponent(app), { method: 'POST' })
         .then(res => res.json())
         .then(res => {
-          alert(res.message || 'پوشه حذف شد.');
+          alert(res.message || 'Application folder removed.');
           document.getElementById('currentApp').value = '';
           loadApps();
         })
-        .catch(err => alert('خطا در حذف پوشه: ' + err));
+        .catch(err => alert('Error deleting folder: ' + err));
     }
 
     function onAppChange() {
@@ -584,7 +622,7 @@
         .then(files => {
           const tbody = document.querySelector('#filesTable tbody');
           if (!files || files.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#94a3b8;">هیچ فایلی در پوشه <strong>${app || 'Root'}</strong> یافت نشد. فایل نصبی برنامه را از کادر بالا آپلود کنید.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#94a3b8;">No update files found in <strong>${app || 'Root'}</strong>. Upload a package above.</td></tr>`;
             return;
           }
           tbody.innerHTML = files.map(f => `
@@ -594,10 +632,10 @@
               <td>${f.size_str}</td>
               <td>
                 <span class="hash-badge" title="${f.sha256}">${f.sha256}</span>
-                <button class="btn-secondary" onclick="useHash('${f.name}', '${f.sha256}')" style="margin-right:6px;">انتخاب هش</button>
+                <button class="btn-secondary" onclick="useHash('${f.name}', '${f.sha256}')" style="margin-left:6px;">Select Hash</button>
               </td>
-              <td><a href="${f.url}" target="_blank" style="color:var(--accent); text-decoration:none;">🔗 دانلود مستقیم</a></td>
-              <td><button class="btn-danger" onclick="deleteFile('${f.app}', '${f.name}')">حذف</button></td>
+              <td><a href="${f.url}" target="_blank" style="color:var(--accent); text-decoration:none;">🔗 Download</a></td>
+              <td><button class="btn-danger" onclick="deleteFile('${f.app}', '${f.name}')">Delete</button></td>
             </tr>
           `).join('');
         })
@@ -630,17 +668,17 @@
       })
       .then(res => res.json())
       .then(res => {
-        alert(res.message || 'فایل‌های AutoUpdater.xml و AutoUpdater.json با موفقیت تولید شدند.');
+        alert(res.message || 'AutoUpdater.xml and AutoUpdater.json generated successfully.');
         loadApps();
         loadFiles();
       })
-      .catch(err => alert('خطا در تولید فایل‌ها: ' + err));
+      .catch(err => alert('Error generating configs: ' + err));
     }
 
     function uploadSelectedFile() {
       const fileInput = document.getElementById('uploadFile');
       if (!fileInput.files || fileInput.files.length === 0) {
-        alert('لطفاً ابتدا یک فایل را انتخاب فرمایید.');
+        alert('Please select a file first.');
         return;
       }
       const app = document.getElementById('currentApp').value;
@@ -649,7 +687,7 @@
 
       const btn = event.target;
       const originalText = btn.innerText;
-      btn.innerText = 'در حال آپلود و پردازش...';
+      btn.innerText = 'Uploading and hashing...';
       btn.disabled = true;
 
       fetch(url, {
@@ -658,12 +696,12 @@
       })
       .then(res => res.json())
       .then(res => {
-        alert('فایل ' + res.filename + ' با موفقیت به پوشه ' + (res.app || 'Root') + ' منتقل شد.\nهش SHA-256: ' + res.sha256);
+        alert('File ' + res.filename + ' uploaded successfully to folder ' + (res.app || 'Root') + '.\nSHA-256: ' + res.sha256);
         useHash(res.filename, res.sha256);
         loadFiles();
         fileInput.value = '';
       })
-      .catch(err => alert('خطا در بارگذاری فایل: ' + err))
+      .catch(err => alert('Upload failed: ' + err))
       .finally(() => {
         btn.innerText = originalText;
         btn.disabled = false;
@@ -671,13 +709,13 @@
     }
 
     function deleteFile(app, name) {
-      if (!confirm('آیا از حذف فایل ' + name + ' از پوشه ' + (app || 'Root') + ' مطمئن هستید؟')) return;
+      if (!confirm('Are you sure you want to delete "' + name + '" from "' + (app || 'Root') + '"?')) return;
       fetch('/api/delete?app=' + encodeURIComponent(app) + '&name=' + encodeURIComponent(name), { method: 'POST' })
         .then(res => res.json())
         .then(res => {
           loadFiles();
         })
-        .catch(err => alert('خطا: ' + err));
+        .catch(err => alert('Error: ' + err));
     }
 
     function updateCSharpCode() {
@@ -687,15 +725,15 @@
       const jsonUrl = app ? `http://${currentHost}/${app}/AutoUpdater.json` : `http://${currentHost}/AutoUpdater.json`;
 
       document.getElementById('csharpCode').innerText = 
-`// در پروژه سی‌شارپ مربوط به نرم‌افزار "${app || 'عمومی'}":
+`// In your .NET / C# application for "${app || 'Default App'}":
 using AutoUpdaterDotNET;
 
 public void CheckSoftwareUpdate()
 {
-    // دریافت اطلاعات به‌روزرسانی از پوشه اختصاصی این نرم‌افزار روی سرور:
+    // Start update check from this server's dedicated application catalog:
     AutoUpdater.Start("${xmlUrl}");
 
-    // یا در صورت استفاده از ساختار JSON:
+    // Or if using JSON format:
     // AutoUpdater.Start("${jsonUrl}");
 }`;
     }
