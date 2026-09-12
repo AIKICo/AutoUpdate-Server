@@ -1317,9 +1317,12 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             return 0;
         }
 
-        char resp[512];
+        char esc_path[2048];
+        json_escape(ctx->updates_dir, esc_path, sizeof(esc_path));
+
+        char resp[2560];
         snprintf(resp, sizeof(resp), "{\"port\": %d, \"storage_path\": \"%s\", \"updates_dir\": \"%s\", \"version\": \"2.0.0\"}\n",
-                 ctx->port, ctx->updates_dir, ctx->updates_dir);
+                 ctx->port, esc_path, esc_path);
         return http_send_json(sock, 200, resp);
     }
 
@@ -1361,8 +1364,8 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         return 0;
     }
 
-    /* 1j. API: Change Storage Path */
-    if (strcmp(req->path, "/api/settings/storage_path") == 0 && req->method == HTTP_METHOD_POST) {
+    /* 1j. API: Change Storage Path (Supports /api/settings/storage and /api/settings/storage_path) */
+    if ((strcmp(req->path, "/api/settings/storage") == 0 || strcmp(req->path, "/api/settings/storage_path") == 0) && req->method == HTTP_METHOD_POST) {
         if (!admin_is_authorized(req, ctx)) {
             send_auth_required(sock);
             return 0;
@@ -1373,8 +1376,14 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         if (strlen(new_path) == 0) {
             get_body_param(req->body, "updates_dir", new_path, sizeof(new_path));
         }
+        if (strlen(new_path) == 0) {
+            get_body_param(req->body, "path", new_path, sizeof(new_path));
+        }
         if (strlen(new_path) == 0 && strlen(req->query) > 0) {
             get_query_param(req->query, "storage_path", new_path, sizeof(new_path));
+            if (strlen(new_path) == 0) {
+                get_query_param(req->query, "updates_dir", new_path, sizeof(new_path));
+            }
         }
 
         if (strlen(new_path) == 0) {
@@ -1388,8 +1397,11 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         server_set_storage_path(ctx, new_path);
 
         log_msg("INFO", "Updates storage directory changed to: %s", ctx->updates_dir);
-        char resp[1200];
-        snprintf(resp, sizeof(resp), "{\"success\": true, \"storage_path\": \"%s\", \"message\": \"Storage path updated successfully.\"}\n", ctx->updates_dir);
+        char esc_path[2048];
+        json_escape(ctx->updates_dir, esc_path, sizeof(esc_path));
+
+        char resp[2560];
+        snprintf(resp, sizeof(resp), "{\"success\": true, \"storage_path\": \"%s\", \"message\": \"Storage path updated successfully.\"}\n", esc_path);
         return http_send_json(sock, 200, resp);
     }
 
@@ -1699,6 +1711,212 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         return http_send_json(sock, 200, "{\"success\": true, \"message\": \"AutoUpdater.xml and AutoUpdater.json generated successfully.\"}\n");
     }
 
+    /* 7a. API: Inspect Package and List All Executables (for operator selection) */
+    if (strcmp(req->path, "/api/inspect_package") == 0) {
+        if (!admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+
+        char app_name[128] = {0};
+        get_query_param(req->query, "app", app_name, sizeof(app_name));
+
+        char inspect_zip_path[1024] = {0};
+        char temp_inspect_dir[1024] = {0};
+        int is_temp = 0;
+
+        if (req->method == HTTP_METHOD_POST && req->body && req->body_len >= 22) {
+            /* Inspect uploaded package directly */
+            snprintf(temp_inspect_dir, sizeof(temp_inspect_dir), "%s/_inspect_%lu", ctx->updates_dir, (unsigned long)time(NULL));
+            MKDIR(temp_inspect_dir);
+
+            int is_exe = (req->body_len >= 64 && (unsigned char)req->body[0] == 'M' && (unsigned char)req->body[1] == 'Z');
+            if (is_exe) {
+                snprintf(inspect_zip_path, sizeof(inspect_zip_path), "%s/uploaded.exe", temp_inspect_dir);
+            } else {
+                snprintf(inspect_zip_path, sizeof(inspect_zip_path), "%s/uploaded.zip", temp_inspect_dir);
+            }
+
+            FILE *f = fopen(inspect_zip_path, "wb");
+            if (!f) {
+                return http_send_error(sock, 500, "Cannot write temporary inspection file");
+            }
+            fwrite(req->body, 1, req->body_len, f);
+            fclose(f);
+            is_temp = 1;
+        } else if (strlen(app_name) > 0 && sanitize_name(app_name)) {
+            /* Inspect already uploaded app in updates dir */
+            snprintf(inspect_zip_path, sizeof(inspect_zip_path), "%s/%s/%s.zip", ctx->updates_dir, app_name, app_name);
+            struct stat st;
+            if (stat(inspect_zip_path, &st) != 0) {
+                snprintf(inspect_zip_path, sizeof(inspect_zip_path), "%s/%s/%s.exe", ctx->updates_dir, app_name, app_name);
+                if (stat(inspect_zip_path, &st) != 0) {
+                    return http_send_json(sock, 404, "{\"success\": false, \"message\": \"Package not found for application.\"}\n");
+                }
+            }
+        } else {
+            return http_send_error(sock, 400, "No package file uploaded or app parameter specified");
+        }
+
+        /* Check if inspect_zip_path is a raw EXE */
+        int is_raw_exe = 0;
+        FILE *chk = fopen(inspect_zip_path, "rb");
+        if (chk) {
+            unsigned char sig[2];
+            if (fread(sig, 1, 2, chk) == 2 && sig[0] == 'M' && sig[1] == 'Z') {
+                is_raw_exe = 1;
+            }
+            fclose(chk);
+        }
+
+        char *resp = malloc(65536);
+        if (!resp) {
+            if (is_temp && temp_inspect_dir[0]) {
+                delete_directory_recursive(temp_inspect_dir);
+            }
+            return http_send_error(sock, 500, "Out of memory");
+        }
+
+        if (is_raw_exe) {
+            pe_details_t pe;
+            memset(&pe, 0, sizeof(pe));
+            inspect_pe_executable(inspect_zip_path, &pe);
+
+            const char *slash = strrchr(inspect_zip_path, '/');
+            if (!slash) slash = strrchr(inspect_zip_path, '\\');
+            const char *bname = slash ? slash + 1 : inspect_zip_path;
+
+            char esc_exe[256], esc_arch[128], esc_runtime[128], esc_fver[128], esc_pver[128], esc_desc[256];
+            json_escape(bname, esc_exe, sizeof(esc_exe));
+            json_escape(pe.architecture, esc_arch, sizeof(esc_arch));
+            json_escape(pe.runtime, esc_runtime, sizeof(esc_runtime));
+            json_escape(pe.file_version, esc_fver, sizeof(esc_fver));
+            json_escape(pe.product_version, esc_pver, sizeof(esc_pver));
+            json_escape(pe.file_description, esc_desc, sizeof(esc_desc));
+
+            snprintf(resp, 65536,
+                "{\n"
+                "  \"success\": true,\n"
+                "  \"count\": 1,\n"
+                "  \"recommended_exe\": \"%s\",\n"
+                "  \"recommended_version\": \"%s\",\n"
+                "  \"executables\": [\n"
+                "    {\n"
+                "      \"name\": \"%s\",\n"
+                "      \"path\": \"%s\",\n"
+                "      \"size\": %llu,\n"
+                "      \"version\": \"%s\",\n"
+                "      \"product_version\": \"%s\",\n"
+                "      \"description\": \"%s\",\n"
+                "      \"architecture\": \"%s\",\n"
+                "      \"runtime\": \"%s\",\n"
+                "      \"is_recommended\": true,\n"
+                "      \"score\": 100\n"
+                "    }\n"
+                "  ]\n"
+                "}\n",
+                esc_exe, esc_fver,
+                esc_exe, esc_exe, (unsigned long long)pe.file_size,
+                esc_fver, esc_pver, esc_desc, esc_arch, esc_runtime);
+        } else {
+            /* ZIP archive: list all .exe entries */
+            zip_exe_entry_t entries[32];
+            int num_entries = zip_list_executable_entries(inspect_zip_path, app_name, entries, 32);
+
+            char temp_work_dir[1024];
+            snprintf(temp_work_dir, sizeof(temp_work_dir), "%s/_work_%lu", ctx->updates_dir, (unsigned long)time(NULL));
+            MKDIR(temp_work_dir);
+
+            int buf_offset = snprintf(resp, 65536,
+                "{\n"
+                "  \"success\": true,\n"
+                "  \"count\": %d,\n",
+                num_entries);
+
+            char rec_exe[256] = "Not found";
+            char rec_ver[64] = "1.0.0.0";
+
+            int exe_items_offset = snprintf(resp + buf_offset, 65536 - buf_offset, "  \"executables\": [\n");
+            buf_offset += exe_items_offset;
+
+            for (int i = 0; i < num_entries; i++) {
+                char temp_extracted_exe[1024];
+                snprintf(temp_extracted_exe, sizeof(temp_extracted_exe), "%s/%s", temp_work_dir, entries[i].file_name);
+
+                pe_details_t pe;
+                memset(&pe, 0, sizeof(pe));
+
+                if (zip_extract_entry(inspect_zip_path, entries[i].entry_path, temp_extracted_exe) == 0) {
+                    inspect_pe_executable(temp_extracted_exe, &pe);
+#ifdef _WIN32
+                    SetFileAttributesA(temp_extracted_exe, FILE_ATTRIBUTE_NORMAL);
+                    if (DeleteFileA(temp_extracted_exe) == 0) remove(temp_extracted_exe);
+#else
+                    chmod(temp_extracted_exe, 0777);
+                    unlink(temp_extracted_exe);
+                    remove(temp_extracted_exe);
+#endif
+                }
+
+                if (i == 0) {
+                    strncpy(rec_exe, entries[i].file_name, sizeof(rec_exe) - 1);
+                    strncpy(rec_ver, (strlen(pe.file_version) > 0) ? pe.file_version : "1.0.0.0", sizeof(rec_ver) - 1);
+                }
+
+                char esc_name[256], esc_path[1024], esc_arch[128], esc_runtime[128], esc_fver[128], esc_pver[128], esc_desc[256];
+                json_escape(entries[i].file_name, esc_name, sizeof(esc_name));
+                json_escape(entries[i].entry_path, esc_path, sizeof(esc_path));
+                json_escape(pe.architecture, esc_arch, sizeof(esc_arch));
+                json_escape(pe.runtime, esc_runtime, sizeof(esc_runtime));
+                json_escape((strlen(pe.file_version) > 0) ? pe.file_version : "1.0.0.0", esc_fver, sizeof(esc_fver));
+                json_escape(pe.product_version, esc_pver, sizeof(esc_pver));
+                json_escape(pe.file_description, esc_desc, sizeof(esc_desc));
+
+                int item_len = snprintf(resp + buf_offset, 65536 - buf_offset,
+                    "    {\n"
+                    "      \"name\": \"%s\",\n"
+                    "      \"path\": \"%s\",\n"
+                    "      \"size\": %llu,\n"
+                    "      \"version\": \"%s\",\n"
+                    "      \"product_version\": \"%s\",\n"
+                    "      \"description\": \"%s\",\n"
+                    "      \"architecture\": \"%s\",\n"
+                    "      \"runtime\": \"%s\",\n"
+                    "      \"is_recommended\": %s,\n"
+                    "      \"score\": %d\n"
+                    "    }%s\n",
+                    esc_name, esc_path, (unsigned long long)entries[i].uncompressed_size,
+                    esc_fver, esc_pver, esc_desc, esc_arch, esc_runtime,
+                    (i == 0) ? "true" : "false",
+                    entries[i].score,
+                    (i < num_entries - 1) ? "," : "");
+
+                buf_offset += item_len;
+            }
+
+            delete_directory_recursive(temp_work_dir);
+
+            char esc_rec_exe[256], esc_rec_ver[64];
+            json_escape(rec_exe, esc_rec_exe, sizeof(esc_rec_exe));
+            json_escape(rec_ver, esc_rec_ver, sizeof(esc_rec_ver));
+
+            snprintf(resp + buf_offset, 65536 - buf_offset,
+                "  ],\n"
+                "  \"recommended_exe\": \"%s\",\n"
+                "  \"recommended_version\": \"%s\"\n"
+                "}\n",
+                esc_rec_exe, esc_rec_ver);
+        }
+
+        if (is_temp && temp_inspect_dir[0]) {
+            delete_directory_recursive(temp_inspect_dir);
+        }
+
+        int ret = http_send_json(sock, 200, resp);
+        free(resp);
+        return ret;
+    }
+
     /* 7b. API: 1-Click Publish from Zip with Auto Version Extraction */
     if (strcmp(req->path, "/api/publish_zip") == 0 && req->method == HTTP_METHOD_POST) {
         if (!admin_is_authorized(req, ctx)) {
@@ -1710,11 +1928,13 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         char mandatory[16] = "false";
         char changelog[2048] = {0};
         char custom_version[64] = {0};
+        char target_exe[256] = {0};
 
         get_query_param(req->query, "app", app_name, sizeof(app_name));
         get_query_param(req->query, "mandatory", mandatory, sizeof(mandatory));
         get_query_param(req->query, "changelog", changelog, sizeof(changelog));
         get_query_param(req->query, "version", custom_version, sizeof(custom_version));
+        get_query_param(req->query, "target_exe", target_exe, sizeof(target_exe));
 
         if (strlen(app_name) == 0 || !sanitize_name(app_name)) {
             return http_send_error(sock, 400, "Invalid application name (English alphanumeric, dashes/underscores only)");
@@ -1771,24 +1991,49 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             snprintf(temp_unpack_dir, sizeof(temp_unpack_dir), "%s/_tmp_%lu", app_dir, (unsigned long)time(NULL));
             MKDIR(temp_unpack_dir);
 
-            log_msg("INFO", "Unpacking package for application '%s' to inspect binary...", app_name);
-            if (extract_zip_archive(zip_dest_path, temp_unpack_dir, app_name) == 0) {
-                char found_exe_path[1024] = {0};
-                if (find_target_executable(temp_unpack_dir, app_name, found_exe_path, sizeof(found_exe_path))) {
-                    const char *s = strrchr(found_exe_path, '/');
-                    if (!s) s = strrchr(found_exe_path, '\\');
-                    if (s) strncpy(detected_exe_name, s + 1, sizeof(detected_exe_name) - 1);
-                    else strncpy(detected_exe_name, found_exe_path, sizeof(detected_exe_name) - 1);
+            int extracted = 0;
 
-                    if (inspect_pe_executable(found_exe_path, &pe_info) == 0) {
-                        strncpy(detected_version, pe_info.file_version, sizeof(detected_version) - 1);
-                        log_msg("INFO", "PE Analysis complete: %s", pe_info.summary);
+            /* Check if operator chose a specific target_exe */
+            if (strlen(target_exe) > 0) {
+                char target_entry[1024] = {0};
+                if (zip_find_executable_entry(zip_dest_path, target_exe, target_entry, sizeof(target_entry))) {
+                    const char *slash = strrchr(target_entry, '/');
+                    if (!slash) slash = strrchr(target_entry, '\\');
+                    const char *bname = slash ? slash + 1 : target_entry;
+
+                    char target_out[1024];
+                    snprintf(target_out, sizeof(target_out), "%s/%s", temp_unpack_dir, bname);
+                    if (zip_extract_entry(zip_dest_path, target_entry, target_out) == 0) {
+                        strncpy(detected_exe_name, bname, sizeof(detected_exe_name) - 1);
+                        if (inspect_pe_executable(target_out, &pe_info) == 0) {
+                            strncpy(detected_version, pe_info.file_version, sizeof(detected_version) - 1);
+                            log_msg("INFO", "Operator-selected executable '%s' extracted & analyzed: %s", bname, pe_info.summary);
+                            extracted = 1;
+                        }
+                    }
+                }
+            }
+
+            if (!extracted) {
+                log_msg("INFO", "Unpacking package for application '%s' to inspect binary...", app_name);
+                if (extract_zip_archive(zip_dest_path, temp_unpack_dir, app_name) == 0) {
+                    char found_exe_path[1024] = {0};
+                    if (find_target_executable(temp_unpack_dir, app_name, found_exe_path, sizeof(found_exe_path))) {
+                        const char *s = strrchr(found_exe_path, '/');
+                        if (!s) s = strrchr(found_exe_path, '\\');
+                        if (s) strncpy(detected_exe_name, s + 1, sizeof(detected_exe_name) - 1);
+                        else strncpy(detected_exe_name, found_exe_path, sizeof(detected_exe_name) - 1);
+
+                        if (inspect_pe_executable(found_exe_path, &pe_info) == 0) {
+                            strncpy(detected_version, pe_info.file_version, sizeof(detected_version) - 1);
+                            log_msg("INFO", "PE Analysis complete: %s", pe_info.summary);
+                        }
+                    } else {
+                        log_msg("WARN", "No suitable .exe binary found in package for '%s'", app_name);
                     }
                 } else {
-                    log_msg("WARN", "No suitable .exe binary found in package for '%s'", app_name);
+                    log_msg("WARN", "Zip extraction failed or timed out for '%s'", app_name);
                 }
-            } else {
-                log_msg("WARN", "Zip extraction failed or timed out for '%s'", app_name);
             }
             delete_directory_recursive(temp_unpack_dir);
         }
@@ -1869,6 +2114,9 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             fprintf(fx, "    <url>%s</url>\n", zip_url);
             fprintf(fx, "    <changelog>%s</changelog>\n", changelog_url);
             fprintf(fx, "    <mandatory>%s</mandatory>\n", (strcmp(mandatory, "true") == 0) ? "true" : "false");
+            if (strlen(detected_exe_name) > 0) {
+                fprintf(fx, "    <executable>%s</executable>\n", detected_exe_name);
+            }
             fprintf(fx, "    <checksum algorithm=\"SHA256\">%s</checksum>\n", sha256_hex);
             fprintf(fx, "</item>\n");
             fclose(fx);
@@ -1883,6 +2131,9 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             fprintf(fj, "  \"version\": \"%s\",\n", final_version);
             fprintf(fj, "  \"url\": \"%s\",\n", zip_url);
             fprintf(fj, "  \"changelog\": \"%s\",\n", changelog_url);
+            if (strlen(detected_exe_name) > 0) {
+                fprintf(fj, "  \"executable\": \"%s\",\n", detected_exe_name);
+            }
             fprintf(fj, "  \"mandatory\": {\n");
             fprintf(fj, "    \"mode\": %d\n", (strcmp(mandatory, "true") == 0) ? 1 : 0);
             fprintf(fj, "  },\n");
@@ -2180,6 +2431,11 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
 
         log_msg("INFO", "Saved file content: %s (%zu bytes)", fpath, req->body_len);
         return http_send_json(sock, 200, "{\"success\": true, \"message\": \"File saved successfully.\"}\n");
+    }
+
+    if (strncmp(req->path, "/api/", 5) == 0) {
+        log_msg("WARN", "API route not found: %s %s", req->method_str, req->path);
+        return http_send_json(sock, 404, "{\"error\": 404, \"message\": \"API route not found.\"}\n");
     }
 
     return -1;

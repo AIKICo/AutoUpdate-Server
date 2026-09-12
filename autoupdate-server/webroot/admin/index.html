@@ -1434,6 +1434,53 @@
       flex-shrink: 0;
     }
 
+    /* Executable Selection Cards */
+    .exe-candidates-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .exe-candidate-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: var(--bg-surface);
+      border: 1.5px solid var(--border-subtle);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .exe-candidate-card:hover {
+      border-color: var(--primary);
+      background: rgba(99, 102, 241, 0.04);
+    }
+    .exe-candidate-card.selected {
+      border-color: var(--primary);
+      background: rgba(99, 102, 241, 0.08);
+      box-shadow: 0 0 0 1px var(--primary);
+    }
+    .exe-radio {
+      accent-color: var(--primary);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      margin: 0;
+    }
+    .badge-recommended {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
   </style>
 </head>
 <body>
@@ -1740,6 +1787,50 @@
                     <span id="selectedFileName">package.zip</span>
                     <span id="selectedFileSize" style="color:var(--text-muted); font-size:0.8rem;">(0 MB)</span>
                     <button type="button" onclick="clearSelectedFile(event)" title="Remove selected file" style="background:transparent; border:none; color:var(--danger); cursor:pointer; font-size:1rem; line-height:1; padding:0 4px; margin-left:6px;">&times;</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Executable Detection & Selection Section -->
+              <div id="exeSelectionContainer" style="display:none; margin-top:14px; animation:fadeIn 0.2s ease;">
+                <div class="card" style="padding:16px; border:1px solid var(--border-subtle); background:var(--bg-canvas); margin-bottom:0;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="width:28px; height:28px; border-radius:6px; background:rgba(99,102,241,0.12); color:var(--primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/></svg>
+                      </div>
+                      <div>
+                        <div style="font-weight:600; font-size:0.88rem; color:var(--text-main);" id="exeSelectionTitle">Detected Executables in Archive</div>
+                        <div style="font-size:0.76rem; color:var(--text-muted);" id="exeSelectionSubtitle">Analyzing package contents...</div>
+                      </div>
+                    </div>
+                    <span class="badge" id="exeCountBadge" style="background:rgba(99,102,241,0.15); color:var(--primary); font-size:0.75rem; font-weight:700; padding:3px 10px; border-radius:12px; border:1px solid rgba(99,102,241,0.3);">0 found</span>
+                  </div>
+
+                  <!-- Single Executable Banner -->
+                  <div id="singleExeNotice" style="display:none; padding:10px 14px; border-radius:6px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); color:var(--text-main); font-size:0.84rem;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <span style="color:var(--success); font-weight:bold; font-size:1rem;">✓</span>
+                      <div>
+                        <span>Primary executable identified: <strong id="singleExeName" style="color:var(--accent-cyan); font-family:var(--font-mono);"></strong></span>
+                        <span id="singleExeMeta" style="color:var(--text-muted); font-size:0.76rem; margin-left:6px;"></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Multiple Executables Selection Notice & Radio List -->
+                  <div id="multipleExeContainer" style="display:none;">
+                    <div style="padding:8px 12px; border-radius:6px; background:rgba(234, 179, 8, 0.1); border:1px solid rgba(234, 179, 8, 0.25); color:var(--text-main); font-size:0.8rem; margin-bottom:10px;">
+                      <span style="color:var(--warning); font-weight:600;">⚠️ Multiple executables detected:</span> Please select the primary application binary to track for versioning and launch on update:
+                    </div>
+                    <div id="exeCandidatesList" class="exe-candidates-list">
+                      <!-- Populated dynamically -->
+                    </div>
+                  </div>
+
+                  <!-- No Executables Notice -->
+                  <div id="emptyExeNotice" style="display:none; padding:10px 14px; border-radius:6px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--text-main); font-size:0.82rem;">
+                    <span style="color:var(--danger); font-weight:600;">Notice:</span> No Windows <code>.exe</code> binaries were detected in the ZIP central directory. The server will unpack and inspect all files upon publish.
                   </div>
                 </div>
               </div>
@@ -2522,6 +2613,232 @@
       }
     });
 
+    let gSelectedTargetExe = '';
+    let gDetectedExeList = [];
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes <= 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    async function parseZipCentralDirectory(file) {
+      try {
+        const maxRead = Math.min(file.size, 65536 + 22);
+        const startOffset = file.size - maxRead;
+        const slice = file.slice(startOffset, file.size);
+        const buffer = await slice.arrayBuffer();
+        const view = new DataView(buffer);
+
+        let eocdPos = -1;
+        for (let i = buffer.byteLength - 22; i >= 0; i--) {
+          if (view.getUint32(i, true) === 0x06054b50) {
+            eocdPos = i;
+            break;
+          }
+        }
+        if (eocdPos === -1) return null;
+
+        const totalEntries = view.getUint16(eocdPos + 10, true);
+        const cdSize = view.getUint32(eocdPos + 12, true);
+        const cdOffset = view.getUint32(eocdPos + 16, true);
+
+        if (cdSize <= 0 || cdOffset < 0 || cdOffset + cdSize > file.size) return null;
+
+        const cdSlice = file.slice(cdOffset, cdOffset + cdSize);
+        const cdBuffer = await cdSlice.arrayBuffer();
+        const cdView = new DataView(cdBuffer);
+        const decoder = new TextDecoder('utf-8');
+
+        const results = [];
+        let pos = 0;
+        while (pos + 46 <= cdBuffer.byteLength) {
+          if (cdView.getUint32(pos, true) !== 0x02014b50) break;
+          const uncompressedSize = cdView.getUint32(pos + 24, true);
+          const fileNameLen = cdView.getUint16(pos + 28, true);
+          const extraLen = cdView.getUint16(pos + 30, true);
+          const commentLen = cdView.getUint16(pos + 32, true);
+
+          if (pos + 46 + fileNameLen <= cdBuffer.byteLength) {
+            const nameBytes = new Uint8Array(cdBuffer, pos + 46, fileNameLen);
+            const entryPath = decoder.decode(nameBytes);
+            const lower = entryPath.toLowerCase();
+
+            if (lower.endsWith('.exe') && !lower.includes('__macosx') && !lower.includes('/.') && !lower.startsWith('.')) {
+              const parts = entryPath.split(/[/\\]/);
+              const baseName = parts[parts.length - 1];
+              results.push({
+                name: baseName,
+                path: entryPath,
+                size: uncompressedSize
+              });
+            }
+          }
+          pos += 46 + fileNameLen + extraLen + commentLen;
+        }
+        return results;
+      } catch (err) {
+        console.warn('Fast ZIP client parsing error:', err);
+        return null;
+      }
+    }
+
+    function scoreExeCandidate(entry, preferredApp) {
+      let score = 50;
+      const name = entry.name.toLowerCase();
+      const path = entry.path.toLowerCase();
+      const app = (preferredApp || '').toLowerCase();
+      const cleanApp = app.replace(/-(win|linux|osx|x64|x86|arm64|framework|net\d+|sc|standalone).*$/i, '');
+
+      // Exact or strong match with app name
+      if (cleanApp && name === `${cleanApp}.exe`) score += 100;
+      else if (cleanApp && name.startsWith(cleanApp)) score += 60;
+      else if (app && name.includes(app)) score += 40;
+
+      // Penalize background / utility binaries
+      if (name.includes('createdump') || name.includes('dump') || name.includes('crashpad')) score -= 80;
+      if (name.includes('uninstall') || name.includes('unins000')) score -= 70;
+      if (name.includes('updater') || name.includes('autoupdate')) score -= 30;
+      if (name.includes('vc_redist') || name.includes('vcredist') || name.includes('setup') || name.includes('install')) score -= 60;
+
+      // Root level preference
+      if (!entry.path.includes('/') && !entry.path.includes('\\')) score += 15;
+
+      // Binary size preference (main apps are rarely < 500 KB)
+      if (entry.size > 2 * 1024 * 1024) score += 20;
+      else if (entry.size > 500 * 1024) score += 10;
+      else if (entry.size < 150 * 1024) score -= 20;
+
+      return score;
+    }
+
+    async function inspectZipCandidates(file) {
+      const container = document.getElementById('exeSelectionContainer');
+      const singleNotice = document.getElementById('singleExeNotice');
+      const multipleContainer = document.getElementById('multipleExeContainer');
+      const emptyNotice = document.getElementById('emptyExeNotice');
+      const candidatesList = document.getElementById('exeCandidatesList');
+      const badge = document.getElementById('exeCountBadge');
+      const subtitle = document.getElementById('exeSelectionSubtitle');
+
+      if (!container) return;
+      container.style.display = 'block';
+      singleNotice.style.display = 'none';
+      multipleContainer.style.display = 'none';
+      emptyNotice.style.display = 'none';
+      candidatesList.innerHTML = '';
+      badge.innerText = 'Scanning...';
+      subtitle.innerText = 'Analyzing package Central Directory...';
+
+      const appInput = document.getElementById('pubAppName');
+      const preferredApp = appInput ? appInput.value.trim() : '';
+
+      let entries = await parseZipCentralDirectory(file);
+
+      if (!entries || entries.length === 0) {
+        gDetectedExeList = [];
+        gSelectedTargetExe = '';
+        badge.innerText = '0 found';
+        subtitle.innerText = 'No executables detected in archive directory';
+        emptyNotice.style.display = 'block';
+        return;
+      }
+
+      // Score and sort candidates
+      entries.forEach(e => {
+        e.score = scoreExeCandidate(e, preferredApp);
+      });
+      entries.sort((a, b) => b.score - a.score);
+      gDetectedExeList = entries;
+
+      badge.innerText = `${entries.length} executable${entries.length > 1 ? 's' : ''} found`;
+
+      if (entries.length === 1) {
+        const single = entries[0];
+        gSelectedTargetExe = single.name;
+        subtitle.innerText = 'Single application executable verified';
+        document.getElementById('singleExeName').innerText = single.name;
+        document.getElementById('singleExeMeta').innerText = `(${formatBytes(single.size)} - ${single.path})`;
+        singleNotice.style.display = 'block';
+      } else {
+        subtitle.innerText = 'Multiple executables found. Select primary binary to launch/track:';
+        // Auto-select top-ranked candidate
+        gSelectedTargetExe = entries[0].name;
+
+        candidatesList.innerHTML = entries.map((entry, idx) => {
+          const isTop = idx === 0;
+          const escName = escapeHtml(entry.name);
+          const escPath = escapeHtml(entry.path);
+          const sizeStr = formatBytes(entry.size);
+          return `
+            <div class="exe-candidate-card ${isTop ? 'selected' : ''}" id="exeCard_${idx}" onclick="selectTargetExe('${escName}', ${idx})">
+              <input type="radio" name="targetExeRadio" class="exe-radio" value="${escName}" ${isTop ? 'checked' : ''} onclick="event.stopPropagation(); selectTargetExe('${escName}', ${idx});">
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <strong style="font-family:var(--font-mono); font-size:0.88rem; color:var(--text-main);">${escName}</strong>
+                  ${isTop ? '<span class="badge-recommended">★ Recommended Main App</span>' : ''}
+                  <span style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${sizeStr}</span>
+                </div>
+                <div style="font-size:0.74rem; color:var(--text-muted); margin-top:2px; font-family:var(--font-mono); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escPath}">
+                  ${escPath}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        multipleContainer.style.display = 'block';
+      }
+    }
+
+    function showSingleExeNotice(name, size) {
+      const container = document.getElementById('exeSelectionContainer');
+      const singleNotice = document.getElementById('singleExeNotice');
+      const multipleContainer = document.getElementById('multipleExeContainer');
+      const emptyNotice = document.getElementById('emptyExeNotice');
+      const badge = document.getElementById('exeCountBadge');
+      const subtitle = document.getElementById('exeSelectionSubtitle');
+
+      if (!container) return;
+      container.style.display = 'block';
+      multipleContainer.style.display = 'none';
+      emptyNotice.style.display = 'none';
+      badge.innerText = '1 executable';
+      subtitle.innerText = 'Standalone executable package';
+      document.getElementById('singleExeName').innerText = name;
+      document.getElementById('singleExeMeta').innerText = `(${formatBytes(size)})`;
+      singleNotice.style.display = 'block';
+      gSelectedTargetExe = name;
+    }
+
+    function selectTargetExe(name, cardIdx) {
+      gSelectedTargetExe = name;
+      document.querySelectorAll('.exe-candidate-card').forEach((card, idx) => {
+        if (idx === cardIdx) {
+          card.classList.add('selected');
+          const radio = card.querySelector('input[type="radio"]');
+          if (radio) radio.checked = true;
+        } else {
+          card.classList.remove('selected');
+          const radio = card.querySelector('input[type="radio"]');
+          if (radio) radio.checked = false;
+        }
+      });
+      showToast(`Primary executable set to: ${name}`, 'info');
+    }
+
     function handleFileSelected(file) {
       if (!file) return;
       const lower = file.name.toLowerCase();
@@ -2546,6 +2863,12 @@
         // App was already chosen; check if there is an unintentional mismatch/overwrite
         checkAppFileMismatch(cleanName);
       }
+
+      if (lower.endsWith('.exe')) {
+        showSingleExeNotice(file.name, file.size);
+      } else {
+        inspectZipCandidates(file);
+      }
     }
 
     function clearSelectedFile(e) {
@@ -2554,12 +2877,16 @@
         e.stopPropagation();
       }
       gSelectedZipFile = null;
+      gSelectedTargetExe = '';
+      gDetectedExeList = [];
       const fileInput = document.getElementById('zipFileInput');
       if (fileInput) fileInput.value = '';
       const dropPrompt = document.getElementById('dropPrompt');
       if (dropPrompt) dropPrompt.style.display = 'block';
       const fileChip = document.getElementById('selectedFileChip');
       if (fileChip) fileChip.style.display = 'none';
+      const exeContainer = document.getElementById('exeSelectionContainer');
+      if (exeContainer) exeContainer.style.display = 'none';
       checkAppFileMismatch();
     }
 
@@ -2891,7 +3218,10 @@
       progressContainer.style.display = 'block';
       resetPublishPipeline();
 
-      const url = `/api/publish_zip?app=${encodeURIComponent(app)}&mandatory=${mandatory}&version=${encodeURIComponent(customVer)}`;
+      let url = `/api/publish_zip?app=${encodeURIComponent(app)}&mandatory=${mandatory}&version=${encodeURIComponent(customVer)}`;
+      if (gSelectedTargetExe) {
+        url += `&target_exe=${encodeURIComponent(gSelectedTargetExe)}`;
+      }
 
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url, true);
@@ -3625,7 +3955,8 @@ AutoUpdater.Start("${data.xml_url}");`;
 
     async function handleStoragePathChange(e) {
       e.preventDefault();
-      const path = document.getElementById('settingStoragePath').value.trim();
+      const pathInput = document.getElementById('settingStoragePath');
+      const path = pathInput ? pathInput.value.trim() : '';
       if (!path) {
         showToast('Storage path cannot be empty', 'warning');
         return;
@@ -3636,23 +3967,40 @@ AutoUpdater.Start("${data.xml_url}");`;
       btn.innerText = 'Saving...';
 
       try {
-        const res = await fetch('/api/settings/storage', {
+        let res = await fetch('/api/settings/storage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ storage_path: path })
         });
-        const d = await res.json();
+        if (res.status === 404) {
+          res = await fetch('/api/settings/storage_path', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ storage_path: path })
+          });
+        }
+
+        let d;
+        try {
+          d = await res.json();
+        } catch (jsonErr) {
+          throw new Error(`HTTP ${res.status}: Invalid server response`);
+        }
+
         btn.disabled = false;
         btn.innerText = 'Save Storage Path';
         if (d.success) {
           showToast('Storage path updated successfully', 'success');
+          if (d.storage_path && pathInput) {
+            pathInput.value = d.storage_path;
+          }
         } else {
           showToast(d.message || 'Failed to update storage path', 'error');
         }
       } catch (err) {
         btn.disabled = false;
         btn.innerText = 'Save Storage Path';
-        showToast('Error: ' + err.message, 'error');
+        showToast('Storage update error: ' + err.message, 'error');
       }
     }
 

@@ -8,6 +8,26 @@
 extern "C" {
 #endif
 
+typedef struct {
+    char entry_path[1024];
+    char file_name[256];
+    uint64_t uncompressed_size;
+    uint32_t crc32;
+    int score;
+} zip_exe_entry_t;
+
+/*
+ * Lists all executable files (.exe) inside a ZIP archive, sorted by relevance score.
+ * Returns the number of executable candidates found.
+ */
+int zip_list_executable_entries(const char *zip_path, const char *preferred_app, zip_exe_entry_t *out_entries, int max_entries);
+
+/*
+ * Finds a specific executable entry by exact entry path or matching base filename.
+ * Returns 1 if found and fills out_entry_path, 0 otherwise.
+ */
+int zip_find_executable_entry(const char *zip_path, const char *target_exe, char *out_entry_path, size_t max_len);
+
 /*
  * Finds the most suitable executable (.exe) inside a ZIP archive.
  * Scores candidates based on preferred_app (stripping platform suffixes like -win-x64).

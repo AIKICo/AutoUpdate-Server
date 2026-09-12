@@ -208,10 +208,9 @@ static int find_eocd(FILE *f, uint32_t *out_cd_offset, uint32_t *out_cd_size, ui
     return 0;
 }
 
-/* Find best executable inside ZIP Central Directory */
-int zip_find_best_executable(const char *zip_path, const char *preferred_app, char *out_entry_path, size_t max_len) {
-    if (!zip_path || !preferred_app || !out_entry_path || max_len == 0) return 0;
-    out_entry_path[0] = '\0';
+/* List all executable entries sorted by relevance score */
+int zip_list_executable_entries(const char *zip_path, const char *preferred_app, zip_exe_entry_t *out_entries, int max_entries) {
+    if (!zip_path || !out_entries || max_entries <= 0) return 0;
 
     FILE *f = fopen(zip_path, "rb");
     if (!f) return 0;
@@ -228,17 +227,20 @@ int zip_find_best_executable(const char *zip_path, const char *preferred_app, ch
         return 0;
     }
 
-    char stripped_app[128];
-    strip_app_suffix(preferred_app, stripped_app, sizeof(stripped_app));
+    char stripped_app[128] = {0};
+    if (preferred_app) {
+        strip_app_suffix(preferred_app, stripped_app, sizeof(stripped_app));
+    }
 
-    int best_score = -1;
-    char best_entry[1024] = {0};
+    int count = 0;
 
     for (uint16_t i = 0; i < total_entries; i++) {
         unsigned char hdr[46];
         if (fread(hdr, 1, 46, f) != 46) break;
         if (hdr[0] != 0x50 || hdr[1] != 0x4B || hdr[2] != 0x01 || hdr[3] != 0x02) break;
 
+        uint32_t crc = read_le32(hdr + 16);
+        uint32_t uncomp_size = read_le32(hdr + 24);
         uint16_t name_len = read_le16(hdr + 28);
         uint16_t extra_len = read_le16(hdr + 30);
         uint16_t comment_len = read_le16(hdr + 32);
@@ -255,24 +257,98 @@ int zip_find_best_executable(const char *zip_path, const char *preferred_app, ch
             fseek(f, extra_len + comment_len, SEEK_CUR);
         }
 
-        /* Check score */
-        int score = score_executable_candidate(name, preferred_app, stripped_app);
-        if (score > best_score) {
-            best_score = score;
-            strncpy(best_entry, name, sizeof(best_entry) - 1);
-            best_entry[sizeof(best_entry) - 1] = '\0';
-            if (best_score >= 100) break; /* Perfect match */
+        size_t nlen = strlen(name);
+        if (nlen < 4) continue;
+        const char *ext = name + nlen - 4;
+#ifdef _WIN32
+        if (_stricmp(ext, ".exe") != 0) continue;
+#else
+        if (strcasecmp(ext, ".exe") != 0) continue;
+#endif
+
+        if (count < max_entries) {
+            strncpy(out_entries[count].entry_path, name, sizeof(out_entries[count].entry_path) - 1);
+            out_entries[count].entry_path[sizeof(out_entries[count].entry_path) - 1] = '\0';
+
+            const char *slash = strrchr(name, '/');
+            const char *bslash = strrchr(name, '\\');
+            const char *base = slash > bslash ? slash + 1 : (bslash ? bslash + 1 : name);
+            strncpy(out_entries[count].file_name, base, sizeof(out_entries[count].file_name) - 1);
+            out_entries[count].file_name[sizeof(out_entries[count].file_name) - 1] = '\0';
+
+            out_entries[count].uncompressed_size = uncomp_size;
+            out_entries[count].crc32 = crc;
+            out_entries[count].score = score_executable_candidate(name, preferred_app ? preferred_app : "", stripped_app);
+            count++;
         }
     }
 
     fclose(f);
 
-    if (best_score > 0 && best_entry[0] != '\0') {
-        strncpy(out_entry_path, best_entry, max_len - 1);
+    /* Sort entries descending by score */
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (out_entries[j].score > out_entries[i].score) {
+                zip_exe_entry_t tmp = out_entries[i];
+                out_entries[i] = out_entries[j];
+                out_entries[j] = tmp;
+            }
+        }
+    }
+
+    return count;
+}
+
+/* Find specific executable by name or path */
+int zip_find_executable_entry(const char *zip_path, const char *target_exe, char *out_entry_path, size_t max_len) {
+    if (!zip_path || !target_exe || !out_entry_path || max_len == 0) return 0;
+    out_entry_path[0] = '\0';
+
+    zip_exe_entry_t list[64];
+    int n = zip_list_executable_entries(zip_path, NULL, list, 64);
+    if (n <= 0) return 0;
+
+    /* 1. Exact match on entry_path */
+    for (int i = 0; i < n; i++) {
+#ifdef _WIN32
+        if (_stricmp(list[i].entry_path, target_exe) == 0) {
+#else
+        if (strcasecmp(list[i].entry_path, target_exe) == 0) {
+#endif
+            strncpy(out_entry_path, list[i].entry_path, max_len - 1);
+            out_entry_path[max_len - 1] = '\0';
+            return 1;
+        }
+    }
+
+    /* 2. Match on base file_name */
+    for (int i = 0; i < n; i++) {
+#ifdef _WIN32
+        if (_stricmp(list[i].file_name, target_exe) == 0) {
+#else
+        if (strcasecmp(list[i].file_name, target_exe) == 0) {
+#endif
+            strncpy(out_entry_path, list[i].entry_path, max_len - 1);
+            out_entry_path[max_len - 1] = '\0';
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* Find best executable inside ZIP Central Directory */
+int zip_find_best_executable(const char *zip_path, const char *preferred_app, char *out_entry_path, size_t max_len) {
+    if (!zip_path || !preferred_app || !out_entry_path || max_len == 0) return 0;
+    out_entry_path[0] = '\0';
+
+    zip_exe_entry_t list[64];
+    int n = zip_list_executable_entries(zip_path, preferred_app, list, 64);
+    if (n > 0) {
+        strncpy(out_entry_path, list[0].entry_path, max_len - 1);
         out_entry_path[max_len - 1] = '\0';
         return 1;
     }
-
     return 0;
 }
 
