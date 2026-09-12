@@ -17,8 +17,13 @@ if ! command -v gcc &> /dev/null; then
 fi
 
 mkdir -p bin
-gcc -O3 -Wall -pthread -D_GNU_SOURCE src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c -lsqlite3 -lpthread -ldl -lm -o autoupdate-server
-chmod +x autoupdate-server
+if [ -f "src/sqlite3.c" ]; then
+    gcc -O3 -Wall -pthread -D_GNU_SOURCE -Isrc -DSQLITE_THREADSAFE=1 src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c src/sqlite3.c -lpthread -ldl -lm -o autoupdate-server
+else
+    gcc -O3 -Wall -pthread -D_GNU_SOURCE src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c -lsqlite3 -lpthread -ldl -lm -o autoupdate-server
+fi
+cp autoupdate-server bin/autoupdate-server 2>/dev/null || true
+chmod +x autoupdate-server bin/autoupdate-server 2>/dev/null || true
 
 echo "==> Build Successful: $(pwd)/autoupdate-server"
 echo "    Start the server with: ./run_linux.sh"

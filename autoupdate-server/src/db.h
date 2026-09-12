@@ -5,11 +5,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifdef _WIN32
+#if defined(_MSC_VER) && !defined(USE_AMALGAMATION)
 #include <winsqlite/winsqlite3.h>
 #pragma comment(lib, "winsqlite3.lib")
-#else
+#elif __has_include("sqlite3.h")
+#include "sqlite3.h"
+#elif __has_include(<sqlite3.h>)
 #include <sqlite3.h>
+#else
+#include <winsqlite/winsqlite3.h>
 #endif
 
 int db_init(const char *db_path);

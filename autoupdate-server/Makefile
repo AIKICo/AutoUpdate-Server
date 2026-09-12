@@ -1,8 +1,14 @@
 CC ?= gcc
-CFLAGS ?= -O3 -Wall -pthread -D_GNU_SOURCE
-LDFLAGS ?= -lsqlite3 -lpthread -ldl -lm
+CFLAGS ?= -O3 -Wall -pthread -D_GNU_SOURCE -Isrc -DSQLITE_THREADSAFE=1
 TARGET = bin/autoupdate-server
-SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c
+
+ifeq ($(wildcard src/sqlite3.c),)
+    SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c
+    LDFLAGS ?= -lsqlite3 -lpthread -ldl -lm
+else
+    SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c src/sqlite3.c
+    LDFLAGS ?= -lpthread -ldl -lm
+endif
 
 PUBLISH_DIR = publish/linux-x64
 PUBLISH_ARCHIVE = publish/autoupdate-server-linux-x64.tar.gz

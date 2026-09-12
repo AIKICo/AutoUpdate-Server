@@ -215,6 +215,7 @@
     #include <arpa/inet.h>
     #include <unistd.h>
     #include <sys/stat.h>
+    #include <pthread.h>
 
     typedef int socket_t;
     #define CLOSE_SOCK(s) close(s)
