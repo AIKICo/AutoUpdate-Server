@@ -18,9 +18,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoUpdate Server - Management Console</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root, [data-theme="dark"] {
       --bg-canvas: #090d16;
@@ -88,13 +85,13 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
 
     code, pre, .mono {
-      font-family: 'JetBrains Mono', Consolas, monospace !important;
+      font-family: ui-monospace, SFMono-Regular, "Cascadia Code", "Segoe UI Mono", Menlo, Consolas, "Liberation Mono", monospace !important;
     }
 
     body {
@@ -1000,7 +997,7 @@
       justify-content: space-between;
       color: var(--accent-cyan);
       text-decoration: none;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: ui-monospace, monospace;
       font-size: 0.8rem;
       padding: 5px 8px;
       background: var(--input-bg);
@@ -1502,7 +1499,7 @@
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--input-bg); border:1px solid var(--border-subtle); padding:8px 12px; border-radius:8px;">
           <div style="display:inline-flex; align-items:center; gap:8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary);"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            <code style="font-family:'JetBrains Mono',monospace; font-weight:600; color:var(--primary); font-size:0.85rem;">admin / admin123</code>
+            <code class="mono" style="font-weight:600; color:var(--primary); font-size:0.85rem;">admin / admin123</code>
           </div>
           <button type="button" onclick="fillDefaultCredentials()" class="btn btn-secondary btn-sm" style="padding:4px 10px; font-size:0.76rem;" title="Click to fill credentials">
             Autofill ⚡
