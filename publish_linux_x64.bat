@@ -21,7 +21,7 @@ mkdir "%OUT_DIR%\webroot"
 echo [1/5] Building static Linux x64 executable...
 set ZIG_EXE=C:\Users\Milad.nisoc\AppData\Local\Temp\zig_extracted\zig-x86_64-windows-0.14.1\zig.exe
 if exist "%ZIG_EXE%" (
-    "%ZIG_EXE%" cc -target x86_64-linux-musl -O3 -static -pthread -I"%SRC_DIR%\src" -DSQLITE_THREADSAFE=1 "%SRC_DIR%\src\main.c" "%SRC_DIR%\src\server.c" "%SRC_DIR%\src\http.c" "%SRC_DIR%\src\admin.c" "%SRC_DIR%\src\utils.c" "%SRC_DIR%\src\sha256.c" "%SRC_DIR%\src\md5.c" "%SRC_DIR%\src\db.c" "%SRC_DIR%\src\sqlite3.c" -o "%SRC_DIR%\bin\autoupdate-server"
+    "%ZIG_EXE%" cc -target x86_64-linux-musl -O3 -static -pthread -I"%SRC_DIR%\src" -DSQLITE_THREADSAFE=1 "%SRC_DIR%\src\main.c" "%SRC_DIR%\src\server.c" "%SRC_DIR%\src\http.c" "%SRC_DIR%\src\admin.c" "%SRC_DIR%\src\utils.c" "%SRC_DIR%\src\sha256.c" "%SRC_DIR%\src\md5.c" "%SRC_DIR%\src\db.c" "%SRC_DIR%\src\sqlite3.c" "%SRC_DIR%\src\puff.c" "%SRC_DIR%\src\zip_reader.c" -o "%SRC_DIR%\bin\autoupdate-server"
 )
 
 if exist "%SRC_DIR%\bin\autoupdate-server" (

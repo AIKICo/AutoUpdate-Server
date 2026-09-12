@@ -3,10 +3,10 @@ CFLAGS ?= -O3 -Wall -pthread -D_GNU_SOURCE -Isrc -DSQLITE_THREADSAFE=1
 TARGET = bin/autoupdate-server
 
 ifeq ($(wildcard src/sqlite3.c),)
-    SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c
+    SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c src/puff.c src/zip_reader.c
     LDFLAGS ?= -lsqlite3 -lpthread -ldl -lm
 else
-    SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c src/sqlite3.c
+    SRCS = src/main.c src/server.c src/http.c src/admin.c src/utils.c src/sha256.c src/md5.c src/db.c src/sqlite3.c src/puff.c src/zip_reader.c
     LDFLAGS ?= -lpthread -ldl -lm
 endif
 

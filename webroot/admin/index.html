@@ -1729,12 +1729,12 @@
               </div>
 
               <div class="form-group">
-                <label>Application Zip Package (.zip)</label>
+                <label>Application Package (.zip or .exe)</label>
                 <div class="drop-zone" id="zipDropZone" onclick="document.getElementById('zipFileInput').click()">
-                  <input type="file" id="zipFileInput" accept=".zip" style="display:none" onchange="handleFileSelected(this.files[0])">
+                  <input type="file" id="zipFileInput" accept=".zip,.exe" style="display:none" onchange="handleFileSelected(this.files[0])">
                   <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                  <div class="drop-zone-text" id="dropPrompt">Click to browse or drag & drop ZIP file here</div>
-                  <div class="drop-zone-sub">Supports any Windows .NET or Native executable packaged inside a ZIP file</div>
+                  <div class="drop-zone-text" id="dropPrompt">Click to browse or drag & drop ZIP or EXE file here</div>
+                  <div class="drop-zone-sub">Supports ZIP archives or standalone Windows .NET / Native executables</div>
                   <div id="selectedFileChip" style="display:none;" class="file-chip">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                     <span id="selectedFileName">package.zip</span>
@@ -2524,8 +2524,9 @@
 
     function handleFileSelected(file) {
       if (!file) return;
-      if (!file.name.toLowerCase().endsWith('.zip')) {
-        showToast('Please select a valid .ZIP package', 'warning');
+      const lower = file.name.toLowerCase();
+      if (!lower.endsWith('.zip') && !lower.endsWith('.exe')) {
+        showToast('Please select a valid .ZIP or .EXE package', 'warning');
         return;
       }
       gSelectedZipFile = file;
@@ -2534,7 +2535,7 @@
       document.getElementById('selectedFileSize').innerText = `(${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
       document.getElementById('selectedFileChip').style.display = 'inline-flex';
 
-      const cleanName = file.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+      const cleanName = file.name.replace(/\.(zip|exe)$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
       const appInput = document.getElementById('pubAppName');
 
       if (!appInput.value) {
@@ -2573,7 +2574,7 @@
         return;
       }
 
-      const fileBaseName = optCleanName || gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+      const fileBaseName = optCleanName || gSelectedZipFile.name.replace(/\.(zip|exe)$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
 
       // Check if file name matches or starts with app name (e.g. App-win-x64, App-v1.2)
       const curLower = currentApp.toLowerCase();
@@ -2598,7 +2599,7 @@
 
     function applyPackageNameAsApp() {
       if (!gSelectedZipFile) return;
-      const cleanName = gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+      const cleanName = gSelectedZipFile.name.replace(/\.(zip|exe)$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
       const appInput = document.getElementById('pubAppName');
       if (appInput) {
         appInput.value = cleanName;
@@ -2612,7 +2613,7 @@
       if (banner) banner.style.display = 'none';
       const appInput = document.getElementById('pubAppName');
       if (appInput && gSelectedZipFile) {
-        const cleanName = gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+        const cleanName = gSelectedZipFile.name.replace(/\.(zip|exe)$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
         gMismatchDismissedFor = `${appInput.value.trim()}::${cleanName}`;
       }
     }
@@ -2860,12 +2861,12 @@
         return;
       }
       if (!gSelectedZipFile) {
-        showToast('Please select a ZIP file to publish', 'warning');
+        showToast('Please select a ZIP or EXE file to publish', 'warning');
         return;
       }
 
       // Safety confirmation: If app already exists on server and package name differs, warn user explicitly
-      const fileBaseName = gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+      const fileBaseName = gSelectedZipFile.name.replace(/\.(zip|exe)$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
       const curLower = app.toLowerCase();
       const fileLower = fileBaseName.toLowerCase();
       const isExact = (fileLower === curLower);

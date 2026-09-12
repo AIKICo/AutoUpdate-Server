@@ -4,6 +4,7 @@
 #include "md5.h"
 #include "db.h"
 #include "server.h"
+#include "zip_reader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -213,14 +214,138 @@ static void normalize_slashes(char *path) {
 #endif
 }
 
+/* Recursively delete directory in pure C with attribute clearing */
+static int delete_directory_recursive(const char *dir_path) {
+    if (!dir_path || strlen(dir_path) == 0) return -1;
+#ifndef _WIN32
+    chmod(dir_path, 0777);
+#endif
+    DIR *d = opendir(dir_path);
+    if (!d) {
+#ifdef _WIN32
+        SetFileAttributesA(dir_path, FILE_ATTRIBUTE_NORMAL);
+        if (DeleteFileA(dir_path) == 0) remove(dir_path);
+#else
+        unlink(dir_path);
+        remove(dir_path);
+#endif
+        struct stat st;
+        return (stat(dir_path, &st) != 0) ? 0 : -1;
+    }
+
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+
+        char subpath[1024];
+        snprintf(subpath, sizeof(subpath), "%s/%s", dir_path, ent->d_name);
+
+        struct stat st;
+        if (stat(subpath, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                delete_directory_recursive(subpath);
+            } else {
+#ifdef _WIN32
+                SetFileAttributesA(subpath, FILE_ATTRIBUTE_NORMAL);
+                if (DeleteFileA(subpath) == 0) remove(subpath);
+#else
+                chmod(subpath, 0777);
+                unlink(subpath);
+                remove(subpath);
+#endif
+            }
+        } else {
+#ifdef _WIN32
+            SetFileAttributesA(subpath, FILE_ATTRIBUTE_NORMAL);
+            if (DeleteFileA(subpath) == 0) remove(subpath);
+#else
+            chmod(subpath, 0777);
+            unlink(subpath);
+            remove(subpath);
+#endif
+        }
+    }
+    closedir(d);
+
+#ifdef _WIN32
+    SetFileAttributesA(dir_path, FILE_ATTRIBUTE_NORMAL);
+    if (_rmdir(dir_path) != 0) {
+        RemoveDirectoryA(dir_path);
+    }
+#else
+    rmdir(dir_path);
+#endif
+
+    /* Secondary fallback if directory still exists */
+    struct stat check_st;
+    if (stat(dir_path, &check_st) == 0) {
+#ifdef _WIN32
+        char norm_dir[1024];
+        strncpy(norm_dir, dir_path, sizeof(norm_dir) - 1);
+        norm_dir[sizeof(norm_dir) - 1] = '\0';
+        normalize_slashes(norm_dir);
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "cmd.exe /c attrib -r -s -h \"%s\\*\" /s /d >nul 2>&1 & cmd.exe /c rmdir /s /q \"%s\" >nul 2>&1", norm_dir, norm_dir);
+        run_hidden_command(cmd);
+#else
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\" >/dev/null 2>&1", dir_path);
+        int rc = system(cmd);
+        (void)rc;
+#endif
+    }
+
+    return (stat(dir_path, &check_st) != 0) ? 0 : -1;
+}
+
+/* Helper to search UTF-16 string in binary buffer and extract following UTF-16 value */
+static int pe_find_utf16_val(const unsigned char *data, size_t len, const char *key, char *out, size_t out_len) {
+    out[0] = '\0';
+    if (!data || len == 0 || !key || out_len == 0) return 0;
+    size_t klen = strlen(key);
+    unsigned char wkey[256];
+    size_t wlen = 0;
+    for (size_t i = 0; i < klen && wlen + 2 < sizeof(wkey); i++) {
+        wkey[wlen++] = (unsigned char)key[i];
+        wkey[wlen++] = 0;
+    }
+
+    for (size_t i = 0; i + wlen + 4 <= len; i += 2) {
+        if (memcmp(data + i, wkey, wlen) == 0) {
+            size_t val_start = i + wlen;
+            while (val_start + 2 <= len && data[val_start] == 0 && data[val_start+1] == 0) {
+                val_start += 2;
+            }
+            size_t j = 0;
+            while (val_start + 2 <= len && j + 1 < out_len) {
+                unsigned char c1 = data[val_start];
+                unsigned char c2 = data[val_start+1];
+                if (c1 == 0 && c2 == 0) break;
+                if (c2 == 0 && (c1 >= 32 && c1 <= 126)) {
+                    out[j++] = (char)c1;
+                } else if (c2 == 0 && c1 >= 128) {
+                    out[j++] = (char)c1;
+                } else if (c2 != 0) {
+                    out[j++] = '?';
+                }
+                val_start += 2;
+            }
+            out[j] = '\0';
+            if (strlen(out) > 0) return 1;
+        }
+    }
+    return 0;
+}
+
 /* Deep PE Executable Inspector */
 int inspect_pe_executable(const char *filepath, pe_details_t *details) {
     if (!filepath || !details) return -1;
     memset(details, 0, sizeof(*details));
 
     const char *slash = strrchr(filepath, '/');
-    if (!slash) slash = strrchr(filepath, '\\');
-    strncpy(details->exe_name, slash ? slash + 1 : filepath, sizeof(details->exe_name) - 1);
+    const char *bslash = strrchr(filepath, '\\');
+    const char *base = slash > bslash ? slash + 1 : (bslash ? bslash + 1 : filepath);
+    strncpy(details->exe_name, base, sizeof(details->exe_name) - 1);
 
     struct stat st;
     if (stat(filepath, &st) == 0) {
@@ -237,7 +362,12 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
     strncpy(details->company_name, "Standard Release", sizeof(details->company_name) - 1);
     strncpy(details->detection_method, "Default Fallback", sizeof(details->detection_method) - 1);
 
-    /* 1. Portable Raw PE Header Parsing (Arch, Subsystem, .NET CLR) */
+    /* 1. Portable Raw PE Header Parsing (Arch, Subsystem, .NET CLR, and .rsrc Table) */
+    uint32_t rsrc_rva = 0;
+    uint32_t rsrc_size = 0;
+    uint32_t rsrc_file_offset = 0;
+    uint32_t rsrc_disk_size = 0;
+
     FILE *f = fopen(filepath, "rb");
     if (f) {
         unsigned char dos_hdr[64];
@@ -250,6 +380,7 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
                     unsigned char fh[20];
                     if (fread(fh, 1, 20, f) == 20) {
                         uint16_t machine = (uint16_t)(fh[0] | (fh[1] << 8));
+                        uint16_t num_sections = (uint16_t)(fh[2] | (fh[3] << 8));
                         if (machine == 0x8664) {
                             strncpy(details->architecture, "x64 (64-bit AMD64)", sizeof(details->architecture) - 1);
                         } else if (machine == 0x014c) {
@@ -276,16 +407,47 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
                                 }
 
                                 uint32_t clr_rva = 0;
-                                if (opt_magic == 0x010B && read_opt >= 212) { /* PE32 */
-                                    clr_rva = (uint32_t)(opt[208] | (opt[209] << 8) | (opt[210] << 16) | (opt[211] << 24));
-                                } else if (opt_magic == 0x020B && read_opt >= 228) { /* PE32+ (64-bit) */
-                                    clr_rva = (uint32_t)(opt[224] | (opt[225] << 8) | (opt[226] << 16) | (opt[227] << 24));
+                                if (opt_magic == 0x010B) { /* PE32 */
+                                    if (read_opt >= 120) {
+                                        rsrc_rva = (uint32_t)(opt[112] | (opt[113] << 8) | (opt[114] << 16) | (opt[115] << 24));
+                                        rsrc_size = (uint32_t)(opt[116] | (opt[117] << 8) | (opt[118] << 16) | (opt[119] << 24));
+                                    }
+                                    if (read_opt >= 212) {
+                                        clr_rva = (uint32_t)(opt[208] | (opt[209] << 8) | (opt[210] << 16) | (opt[211] << 24));
+                                    }
+                                } else if (opt_magic == 0x020B) { /* PE32+ (64-bit) */
+                                    if (read_opt >= 136) {
+                                        rsrc_rva = (uint32_t)(opt[128] | (opt[129] << 8) | (opt[130] << 16) | (opt[131] << 24));
+                                        rsrc_size = (uint32_t)(opt[132] | (opt[133] << 8) | (opt[134] << 16) | (opt[135] << 24));
+                                    }
+                                    if (read_opt >= 228) {
+                                        clr_rva = (uint32_t)(opt[224] | (opt[225] << 8) | (opt[226] << 16) | (opt[227] << 24));
+                                    }
                                 }
 
                                 if (clr_rva != 0) {
                                     strncpy(details->runtime, ".NET CLR Managed Assembly", sizeof(details->runtime) - 1);
                                 } else {
                                     strncpy(details->runtime, "Native Windows Binary", sizeof(details->runtime) - 1);
+                                }
+                            }
+                        }
+
+                        /* Locate Section Headers table to map rsrc_rva to file offset */
+                        long sec_table_offset = e_lfanew + 4 + 20 + opt_size;
+                        if (rsrc_rva > 0 && fseek(f, sec_table_offset, SEEK_SET) == 0) {
+                            for (uint16_t si = 0; si < num_sections; si++) {
+                                unsigned char sec_hdr[40];
+                                if (fread(sec_hdr, 1, 40, f) != 40) break;
+                                uint32_t vSize = (uint32_t)(sec_hdr[8] | (sec_hdr[9] << 8) | (sec_hdr[10] << 16) | (sec_hdr[11] << 24));
+                                uint32_t vAddr = (uint32_t)(sec_hdr[12] | (sec_hdr[13] << 8) | (sec_hdr[14] << 16) | (sec_hdr[15] << 24));
+                                uint32_t rawSize = (uint32_t)(sec_hdr[16] | (sec_hdr[17] << 8) | (sec_hdr[18] << 16) | (sec_hdr[19] << 24));
+                                uint32_t rawOffset = (uint32_t)(sec_hdr[20] | (sec_hdr[21] << 8) | (sec_hdr[22] << 16) | (sec_hdr[23] << 24));
+
+                                if (rsrc_rva >= vAddr && rsrc_rva < (vAddr + vSize)) {
+                                    rsrc_file_offset = rawOffset + (rsrc_rva - vAddr);
+                                    rsrc_disk_size = rawSize;
+                                    break;
                                 }
                             }
                         }
@@ -296,87 +458,21 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
         fclose(f);
     }
 
-    /* 2. Version & String Resource Extraction */
-#ifdef _WIN32
-    DWORD dummy = 0;
-    DWORD size = GetFileVersionInfoSizeA(filepath, &dummy);
-    if (size > 0) {
-        void *data = malloc(size);
-        if (data) {
-            if (GetFileVersionInfoA(filepath, 0, size, data)) {
-                VS_FIXEDFILEINFO *ffi = NULL;
-                UINT len = 0;
-                if (VerQueryValueA(data, "\\", (LPVOID*)&ffi, &len) && ffi && len >= sizeof(VS_FIXEDFILEINFO)) {
-                    WORD v1 = HIWORD(ffi->dwFileVersionMS);
-                    WORD v2 = LOWORD(ffi->dwFileVersionMS);
-                    WORD v3 = HIWORD(ffi->dwFileVersionLS);
-                    WORD v4 = LOWORD(ffi->dwFileVersionLS);
-                    if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
-                        snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                        snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                        strncpy(details->detection_method, "Windows Version Resource (VS_FIXEDFILEINFO)", sizeof(details->detection_method) - 1);
-                    }
-                }
-
-                struct { WORD language; WORD codepage; } *trans = NULL;
-                UINT trans_len = 0;
-                if (VerQueryValueA(data, "\\VarFileInfo\\Translation", (LPVOID*)&trans, &trans_len) && trans_len >= sizeof(*trans)) {
-                    char sub[128];
-                    char *val = NULL;
-                    UINT vlen = 0;
-
-                    snprintf(sub, sizeof(sub), "\\StringFileInfo\\%04x%04x\\ProductVersion", trans[0].language, trans[0].codepage);
-                    if (VerQueryValueA(data, sub, (LPVOID*)&val, &vlen) && val && strlen(val) > 0) {
-                        strncpy(details->product_version, val, sizeof(details->product_version) - 1);
-                        if (strcmp(details->detection_method, "Default Fallback") == 0) {
-                            strncpy(details->file_version, val, sizeof(details->file_version) - 1);
-                            strncpy(details->detection_method, "Windows StringFileInfo (ProductVersion)", sizeof(details->detection_method) - 1);
-                        }
-                    }
-
-                    snprintf(sub, sizeof(sub), "\\StringFileInfo\\%04x%04x\\FileDescription", trans[0].language, trans[0].codepage);
-                    if (VerQueryValueA(data, sub, (LPVOID*)&val, &vlen) && val && strlen(val) > 0) {
-                        strncpy(details->file_description, val, sizeof(details->file_description) - 1);
-                    }
-
-                    snprintf(sub, sizeof(sub), "\\StringFileInfo\\%04x%04x\\CompanyName", trans[0].language, trans[0].codepage);
-                    if (VerQueryValueA(data, sub, (LPVOID*)&val, &vlen) && val && strlen(val) > 0) {
-                        strncpy(details->company_name, val, sizeof(details->company_name) - 1);
-                    }
-
-                    /* Check OriginalFilename for .NET AppHost */
-                    snprintf(sub, sizeof(sub), "\\StringFileInfo\\%04x%04x\\OriginalFilename", trans[0].language, trans[0].codepage);
-                    if (VerQueryValueA(data, sub, (LPVOID*)&val, &vlen) && val && strlen(val) > 0) {
-                        if (strstr(val, ".dll") || strstr(val, ".DLL") || strchr(details->product_version, '+')) {
-                            strncpy(details->runtime, ".NET Windows AppHost", sizeof(details->runtime) - 1);
-                        }
-                    } else if (strchr(details->product_version, '+')) {
-                        strncpy(details->runtime, ".NET Windows AppHost", sizeof(details->runtime) - 1);
-                    }
-
-                }
-            }
-            free(data);
-        }
-    }
-#endif
-
-    /* 3. Fallback Cross-platform PE binary signature scan for VS_FIXEDFILEINFO (0xFEEF04BD) */
-    if (strcmp(details->detection_method, "Default Fallback") == 0) {
-        FILE *f2 = fopen(filepath, "rb");
-        if (f2) {
-            fseek(f2, 0, SEEK_END);
-            long fsize = ftell(f2);
-            if (fsize >= 1024) {
-                if (fsize > 32 * 1024 * 1024) fsize = 32 * 1024 * 1024;
-                fseek(f2, 0, SEEK_SET);
-                unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-                if (buf) {
-                    size_t rd = fread(buf, 1, (size_t)fsize, f2);
+    /* 2. Direct PE Resource Section Parsing */
+    if (rsrc_file_offset > 0 && rsrc_size > 0) {
+        FILE *rf = fopen(filepath, "rb");
+        if (rf) {
+            if (fseek(rf, rsrc_file_offset, SEEK_SET) == 0) {
+                size_t to_read = rsrc_size < rsrc_disk_size ? rsrc_size : rsrc_disk_size;
+                if (to_read > 16 * 1024 * 1024) to_read = 16 * 1024 * 1024;
+                unsigned char *rdata = (unsigned char *)malloc(to_read);
+                if (rdata) {
+                    size_t rd = fread(rdata, 1, to_read, rf);
+                    /* Search for VS_FIXEDFILEINFO (0xFEEF04BD) */
                     for (size_t i = 0; i + 16 <= rd; i++) {
-                        if (buf[i] == 0xBD && buf[i+1] == 0x04 && buf[i+2] == 0xEF && buf[i+3] == 0xFE) {
-                            uint32_t ms = (uint32_t)buf[i+8] | ((uint32_t)buf[i+9] << 8) | ((uint32_t)buf[i+10] << 16) | ((uint32_t)buf[i+11] << 24);
-                            uint32_t ls = (uint32_t)buf[i+12] | ((uint32_t)buf[i+13] << 8) | ((uint32_t)buf[i+14] << 16) | ((uint32_t)buf[i+15] << 24);
+                        if (rdata[i] == 0xBD && rdata[i+1] == 0x04 && rdata[i+2] == 0xEF && rdata[i+3] == 0xFE) {
+                            uint32_t ms = (uint32_t)rdata[i+8] | ((uint32_t)rdata[i+9] << 8) | ((uint32_t)rdata[i+10] << 16) | ((uint32_t)rdata[i+11] << 24);
+                            uint32_t ls = (uint32_t)rdata[i+12] | ((uint32_t)rdata[i+13] << 8) | ((uint32_t)rdata[i+14] << 16) | ((uint32_t)rdata[i+15] << 24);
                             uint16_t v1 = (uint16_t)(ms >> 16);
                             uint16_t v2 = (uint16_t)(ms & 0xFFFF);
                             uint16_t v3 = (uint16_t)(ls >> 16);
@@ -384,13 +480,114 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
                             if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
                                 snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
                                 snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                                strncpy(details->detection_method, "Cross-Platform PE Signature (0xFEEF04BD)", sizeof(details->detection_method) - 1);
+                                strncpy(details->detection_method, "PE Resource (.rsrc VS_FIXEDFILEINFO)", sizeof(details->detection_method) - 1);
                                 break;
                             }
                         }
                     }
-                    free(buf);
+
+                    /* Search for UTF-16 metadata strings in resource table */
+                    char str_val[256];
+                    if (pe_find_utf16_val(rdata, rd, "ProductVersion", str_val, sizeof(str_val))) {
+                        strncpy(details->product_version, str_val, sizeof(details->product_version) - 1);
+                        if (strcmp(details->detection_method, "Default Fallback") == 0) {
+                            strncpy(details->file_version, str_val, sizeof(details->file_version) - 1);
+                            strncpy(details->detection_method, "PE StringFileInfo (ProductVersion)", sizeof(details->detection_method) - 1);
+                        }
+                    }
+                    if (pe_find_utf16_val(rdata, rd, "FileVersion", str_val, sizeof(str_val))) {
+                        if (strcmp(details->detection_method, "Default Fallback") == 0) {
+                            strncpy(details->file_version, str_val, sizeof(details->file_version) - 1);
+                            strncpy(details->detection_method, "PE StringFileInfo (FileVersion)", sizeof(details->detection_method) - 1);
+                        }
+                    }
+                    if (pe_find_utf16_val(rdata, rd, "FileDescription", str_val, sizeof(str_val))) {
+                        strncpy(details->file_description, str_val, sizeof(details->file_description) - 1);
+                    }
+                    if (pe_find_utf16_val(rdata, rd, "CompanyName", str_val, sizeof(str_val))) {
+                        strncpy(details->company_name, str_val, sizeof(details->company_name) - 1);
+                    }
+                    if (pe_find_utf16_val(rdata, rd, "OriginalFilename", str_val, sizeof(str_val))) {
+                        if (strstr(str_val, ".dll") || strstr(str_val, ".DLL") || strchr(details->product_version, '+')) {
+                            strncpy(details->runtime, ".NET Windows AppHost", sizeof(details->runtime) - 1);
+                        }
+                    }
+
+                    free(rdata);
                 }
+            }
+            fclose(rf);
+        }
+    }
+
+    /* 3. Windows Native Version API Verification */
+#ifdef _WIN32
+    if (strcmp(details->detection_method, "Default Fallback") == 0) {
+        DWORD dummy = 0;
+        DWORD size = GetFileVersionInfoSizeA(filepath, &dummy);
+        if (size > 0) {
+            void *data = malloc(size);
+            if (data) {
+                if (GetFileVersionInfoA(filepath, 0, size, data)) {
+                    VS_FIXEDFILEINFO *ffi = NULL;
+                    UINT len = 0;
+                    if (VerQueryValueA(data, "\\", (LPVOID*)&ffi, &len) && ffi && len >= sizeof(VS_FIXEDFILEINFO)) {
+                        WORD v1 = HIWORD(ffi->dwFileVersionMS);
+                        WORD v2 = LOWORD(ffi->dwFileVersionMS);
+                        WORD v3 = HIWORD(ffi->dwFileVersionLS);
+                        WORD v4 = LOWORD(ffi->dwFileVersionLS);
+                        if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
+                            snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                            snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                            strncpy(details->detection_method, "Windows Version Resource (VS_FIXEDFILEINFO)", sizeof(details->detection_method) - 1);
+                        }
+                    }
+                }
+                free(data);
+            }
+        }
+    }
+#endif
+
+    /* 4. Cross-Platform Chunked Full File Scan Fallback for non-standard binaries */
+    if (strcmp(details->detection_method, "Default Fallback") == 0) {
+        FILE *f2 = fopen(filepath, "rb");
+        if (f2) {
+            const size_t chunk_size = 1024 * 1024; /* 1 MB chunks */
+            unsigned char *chunk = (unsigned char *)malloc(chunk_size + 64);
+            if (chunk) {
+                size_t prev_overlap = 0;
+                while (1) {
+                    size_t read_bytes = fread(chunk + prev_overlap, 1, chunk_size, f2);
+                    size_t total_buf = prev_overlap + read_bytes;
+                    if (total_buf < 16) break;
+
+                    for (size_t i = 0; i + 16 <= total_buf; i++) {
+                        if (chunk[i] == 0xBD && chunk[i+1] == 0x04 && chunk[i+2] == 0xEF && chunk[i+3] == 0xFE) {
+                            uint32_t ms = (uint32_t)chunk[i+8] | ((uint32_t)chunk[i+9] << 8) | ((uint32_t)chunk[i+10] << 16) | ((uint32_t)chunk[i+11] << 24);
+                            uint32_t ls = (uint32_t)chunk[i+12] | ((uint32_t)chunk[i+13] << 8) | ((uint32_t)chunk[i+14] << 16) | ((uint32_t)chunk[i+15] << 24);
+                            uint16_t v1 = (uint16_t)(ms >> 16);
+                            uint16_t v2 = (uint16_t)(ms & 0xFFFF);
+                            uint16_t v3 = (uint16_t)(ls >> 16);
+                            uint16_t v4 = (uint16_t)(ls & 0xFFFF);
+                            if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
+                                snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                                snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                                strncpy(details->detection_method, "Cross-Platform Full PE Scan (0xFEEF04BD)", sizeof(details->detection_method) - 1);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (strcmp(details->detection_method, "Default Fallback") != 0 || read_bytes == 0) {
+                        break;
+                    }
+
+                    /* Keep last 32 bytes for overlap */
+                    prev_overlap = total_buf >= 32 ? 32 : total_buf;
+                    memmove(chunk, chunk + total_buf - prev_overlap, prev_overlap);
+                }
+                free(chunk);
             }
             fclose(f2);
         }
@@ -418,182 +615,154 @@ static const char *str_case_contains(const char *haystack, const char *needle) {
     size_t nlen = strlen(needle);
     if (nlen == 0) return haystack;
     for (; *haystack; haystack++) {
+#ifdef _WIN32
+        if (_strnicmp(haystack, needle, nlen) == 0) return haystack;
+#else
         if (strncasecmp(haystack, needle, nlen) == 0) return haystack;
+#endif
     }
     return NULL;
 }
 
-/* Unzip archive into target directory with fast targeted extraction */
-static int extract_zip_archive(const char *zip_path, const char *dest_dir, const char *preferred_app) {
+/* Strip architecture / OS suffix from app name:
+   e.g. SmartPurchaseDocManager-win-x64 -> SmartPurchaseDocManager */
+static void strip_app_suffix(const char *app, char *out, size_t out_len) {
+    strncpy(out, app, out_len - 1);
+    out[out_len - 1] = '\0';
+
+    const char *suffixes[] = {
+        "-win-x64", "_win-x64", ".win-x64", "-win-x86", "_win-x86",
+        "-win-arm64", "_win-arm64", "-windows-x64", "_windows-x64",
+        "-windows", "_windows", "-linux-x64", "_linux-x64",
+        "-win", "_win", "-x64", "_x64", "-x86", "_x86",
+        NULL
+    };
+
+    for (int i = 0; suffixes[i]; i++) {
+        size_t slen = strlen(suffixes[i]);
+        size_t olen = strlen(out);
+        if (olen > slen) {
 #ifdef _WIN32
-    char norm_zip[1024];
-    char norm_dest[1024];
+            if (_stricmp(out + olen - slen, suffixes[i]) == 0) {
+#else
+            if (strcasecmp(out + olen - slen, suffixes[i]) == 0) {
+#endif
+                out[olen - slen] = '\0';
+                break;
+            }
+        }
+    }
+}
+
+/* Score candidate executable based on similarity to preferred_app */
+static int score_candidate_exe(const char *filename, const char *preferred_app, const char *stripped_app) {
+    const char *slash = strrchr(filename, '/');
+    const char *bslash = strrchr(filename, '\\');
+    const char *base = slash > bslash ? slash + 1 : (bslash ? bslash + 1 : filename);
+    size_t blen = strlen(base);
+    if (blen < 4) return 0;
+#ifdef _WIN32
+    if (_stricmp(base + blen - 4, ".exe") != 0) return 0;
+#else
+    if (strcasecmp(base + blen - 4, ".exe") != 0) return 0;
+#endif
+
+    if (str_case_contains(base, "createdump") ||
+        str_case_contains(base, "unins") ||
+        str_case_contains(base, "setup") ||
+        str_case_contains(base, "installer") ||
+        str_case_contains(base, "vc_redist") ||
+        str_case_contains(base, "dxwebsetup")) {
+        return 10;
+    }
+
+    char expected_full[256];
+    snprintf(expected_full, sizeof(expected_full), "%s.exe", preferred_app);
+
+    char expected_clean[256];
+    snprintf(expected_clean, sizeof(expected_clean), "%s.exe", stripped_app);
+
+#ifdef _WIN32
+    if (_stricmp(base, expected_full) == 0) return 100;
+    if (_stricmp(base, expected_clean) == 0) return 90;
+#else
+    if (strcasecmp(base, expected_full) == 0) return 100;
+    if (strcasecmp(base, expected_clean) == 0) return 90;
+#endif
+
+    size_t slen = strlen(stripped_app);
+    if (slen > 0) {
+#ifdef _WIN32
+        if (_strnicmp(base, stripped_app, slen) == 0) return 80;
+#else
+        if (strncasecmp(base, stripped_app, slen) == 0) return 80;
+#endif
+        if (str_case_contains(base, stripped_app)) return 70;
+    }
+
+    return 50;
+}
+
+/* Unzip archive into target directory with fast targeted extraction and pure C zip reader */
+static int extract_zip_archive(const char *zip_path, const char *dest_dir, const char *preferred_app) {
+    /* Step 1: Ultra-fast targeted extraction via pure-C zip_reader */
+    char best_entry[1024] = {0};
+    if (zip_find_best_executable(zip_path, preferred_app, best_entry, sizeof(best_entry))) {
+        log_msg("INFO", "Identified primary executable entry in archive: '%s'", best_entry);
+        const char *slash = strrchr(best_entry, '/');
+        const char *bslash = strrchr(best_entry, '\\');
+        const char *base_name = slash > bslash ? slash + 1 : (bslash ? bslash + 1 : best_entry);
+
+        char target_out[1024];
+        snprintf(target_out, sizeof(target_out), "%s/%s", dest_dir, base_name);
+        if (zip_extract_entry(zip_path, best_entry, target_out) == 0) {
+            log_msg("INFO", "Pure-C targeted extraction succeeded for '%s'", target_out);
+            return 0;
+        }
+    }
+
+    /* Step 2: Full archive extraction via pure-C zip_reader */
+    log_msg("INFO", "Extracting full zip archive '%s' via pure C...", zip_path);
+    if (zip_extract_all(zip_path, dest_dir) == 0) {
+        return 0;
+    }
+
+    /* Step 3: Platform OS tool fallbacks if zip had unsupported features (e.g. Zip64) */
+#ifdef _WIN32
+    char norm_zip[1024], norm_dest[1024];
     strncpy(norm_zip, zip_path, sizeof(norm_zip) - 1);
-    norm_zip[sizeof(norm_zip) - 1] = '\0';
     strncpy(norm_dest, dest_dir, sizeof(norm_dest) - 1);
-    norm_dest[sizeof(norm_dest) - 1] = '\0';
     normalize_slashes(norm_zip);
     normalize_slashes(norm_dest);
 
-    /* Phase 1: Fast targeted extraction of the specific *.exe */
-    char list_file[1024];
-    snprintf(list_file, sizeof(list_file), "%s/_entries.txt", norm_dest);
-    char list_cmd[2048];
-    snprintf(list_cmd, sizeof(list_cmd), "cmd.exe /c tar.exe -tf \"%s\" > \"%s\"", norm_zip, list_file);
-    if (run_hidden_command(list_cmd) == 0) {
-        FILE *fl = fopen(list_file, "r");
-        if (fl) {
-            char line[1024];
-            char exact_exe[1024] = {0};
-            char fallback_exe[1024] = {0};
-            char expected_name[256] = {0};
-            if (preferred_app && strlen(preferred_app) > 0) {
-                snprintf(expected_name, sizeof(expected_name), "%s.exe", preferred_app);
-            }
-
-            while (fgets(line, sizeof(line), fl)) {
-                size_t l = strlen(line);
-                while (l > 0 && (line[l - 1] == '\r' || line[l - 1] == '\n' || line[l - 1] == ' ')) line[--l] = '\0';
-                if (l < 4) continue;
-                if (strcasecmp(line + l - 4, ".exe") == 0) {
-                    const char *slash = strrchr(line, '/');
-                    if (!slash) slash = strrchr(line, '\\');
-                    const char *base = slash ? slash + 1 : line;
-
-                    /* Check for exact match with preferred_app.exe */
-                    if (expected_name[0] && strcasecmp(base, expected_name) == 0) {
-                        strncpy(exact_exe, line, sizeof(exact_exe) - 1);
-                        break;
-                    }
-                    /* Check if base contains preferred_app */
-                    if (preferred_app && strlen(preferred_app) > 0 && str_case_contains(base, preferred_app) && exact_exe[0] == '\0') {
-                        strncpy(exact_exe, line, sizeof(exact_exe) - 1);
-                    }
-                    /* Filter out uninstallers/setup if possible for fallback */
-                    if (strncasecmp(base, "unins", 5) != 0 && strncasecmp(base, "setup", 5) != 0) {
-                        if (fallback_exe[0] == '\0') strncpy(fallback_exe, line, sizeof(fallback_exe) - 1);
-                    } else if (fallback_exe[0] == '\0') {
-                        strncpy(fallback_exe, line, sizeof(fallback_exe) - 1);
-                    }
-                }
-            }
-            fclose(fl);
-            remove(list_file);
-
-            const char *target_exe = exact_exe[0] ? exact_exe : fallback_exe;
-            if (target_exe[0]) {
-                char ext_cmd[2048];
-                snprintf(ext_cmd, sizeof(ext_cmd), "tar.exe -xf \"%s\" -C \"%s\" \"%s\"", norm_zip, norm_dest, target_exe);
-                log_msg("INFO", "Running ultra-fast targeted extraction for binary '%s'...", target_exe);
-                if (run_hidden_command(ext_cmd) == 0) {
-                    return 0;
-                }
-            }
-        } else {
-            remove(list_file);
-        }
-    }
-
-    /* Phase 2: Full archive tar extract */
     char cmd[2048];
     snprintf(cmd, sizeof(cmd), "tar.exe -xf \"%s\" -C \"%s\"", norm_zip, norm_dest);
-    log_msg("INFO", "Targeted extraction fallback to full tar: %s", cmd);
     if (run_hidden_command(cmd) == 0) return 0;
 
-    /* Phase 3: Fallback to powershell Expand-Archive with bypass and non-interactive */
     snprintf(cmd, sizeof(cmd), "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '%s' -DestinationPath '%s' -Force\"", norm_zip, norm_dest);
-    log_msg("WARN", "Tar failed, falling back to PowerShell: %s", cmd);
     return run_hidden_command(cmd);
 #else
-    char list_file[1024];
-    snprintf(list_file, sizeof(list_file), "%s/_entries.txt", dest_dir);
-    char list_cmd[2048];
-    snprintf(list_cmd, sizeof(list_cmd), "tar -tf \"%s\" > \"%s\" 2>/dev/null", zip_path, list_file);
-    if (system(list_cmd) == 0) {
-        FILE *fl = fopen(list_file, "r");
-        if (fl) {
-            char line[1024];
-            char exact_exe[1024] = {0};
-            char fallback_exe[1024] = {0};
-            char expected_name[256] = {0};
-            if (preferred_app && strlen(preferred_app) > 0) {
-                snprintf(expected_name, sizeof(expected_name), "%s.exe", preferred_app);
-            }
-
-            while (fgets(line, sizeof(line), fl)) {
-                size_t l = strlen(line);
-                while (l > 0 && (line[l - 1] == '\r' || line[l - 1] == '\n' || line[l - 1] == ' ')) line[--l] = '\0';
-                if (l < 4) continue;
-                if (strcasecmp(line + l - 4, ".exe") == 0) {
-                    const char *slash = strrchr(line, '/');
-                    if (!slash) slash = strrchr(line, '\\');
-                    const char *base = slash ? slash + 1 : line;
-
-                    if (expected_name[0] && strcasecmp(base, expected_name) == 0) {
-                        strncpy(exact_exe, line, sizeof(exact_exe) - 1);
-                        break;
-                    }
-                    if (fallback_exe[0] == '\0') strncpy(fallback_exe, line, sizeof(fallback_exe) - 1);
-                }
-            }
-            fclose(fl);
-            unlink(list_file);
-
-            const char *target_exe = exact_exe[0] ? exact_exe : fallback_exe;
-            if (target_exe[0]) {
-                char ext_cmd[2048];
-                snprintf(ext_cmd, sizeof(ext_cmd), "tar -xf \"%s\" -C \"%s\" \"%s\" >/dev/null 2>&1", zip_path, dest_dir, target_exe);
-                if (system(ext_cmd) == 0) return 0;
-            }
-        } else {
-            unlink(list_file);
-        }
-    }
-
     char cmd[2048];
+    /* Try python3 zipfile module */
+    snprintf(cmd, sizeof(cmd), "python3 -c \"import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])\" \"%s\" \"%s\" >/dev/null 2>&1", zip_path, dest_dir);
+    if (system(cmd) == 0) return 0;
+
+    /* Try unzip */
     snprintf(cmd, sizeof(cmd), "unzip -q -o \"%s\" -d \"%s\" >/dev/null 2>&1", zip_path, dest_dir);
     if (system(cmd) == 0) return 0;
+
+    /* Try tar */
     snprintf(cmd, sizeof(cmd), "tar -xf \"%s\" -C \"%s\" >/dev/null 2>&1", zip_path, dest_dir);
     return system(cmd);
 #endif
 }
 
-/* Recursively delete directory */
-static void delete_directory_recursive(const char *dir_path) {
-#ifdef _WIN32
-    char norm_dir[1024];
-    strncpy(norm_dir, dir_path, sizeof(norm_dir) - 1);
-    norm_dir[sizeof(norm_dir) - 1] = '\0';
-    normalize_slashes(norm_dir);
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "cmd.exe /c rmdir /s /q \"%s\"", norm_dir);
-    run_hidden_command(cmd);
-#else
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", dir_path);
-    int rc = system(cmd);
-    (void)rc;
-#endif
-}
-
-/* Helper to check if string ends with .exe (case insensitive) */
-static int is_exe_file(const char *filename) {
-    if (!filename) return 0;
-    size_t len = strlen(filename);
-    if (len < 4) return 0;
-    return (strcasecmp(filename + len - 4, ".exe") == 0);
-}
-
-/* Recursively find candidate .exe file */
-static int find_target_executable_recursive(const char *dir_path, const char *preferred_base, char *best_exe, size_t max_len, int depth) {
-    if (depth > 6) return 0;
+/* Recursively find best candidate .exe file */
+static void find_target_executable_recursive(const char *dir_path, const char *preferred_app, const char *stripped_app,
+                                            char *best_exe, int *best_score, int depth) {
+    if (depth > 6) return;
     DIR *d = opendir(dir_path);
-    if (!d) return 0;
-
-    char expected_name[256] = {0};
-    if (preferred_base && strlen(preferred_base) > 0) {
-        snprintf(expected_name, sizeof(expected_name), "%s.exe", preferred_base);
-    }
+    if (!d) return;
 
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
@@ -605,32 +774,37 @@ static int find_target_executable_recursive(const char *dir_path, const char *pr
         struct stat st;
         if (stat(subpath, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                if (find_target_executable_recursive(subpath, preferred_base, best_exe, max_len, depth + 1)) {
-                    closedir(d);
-                    return 1;
-                }
-            } else if (is_exe_file(ent->d_name)) {
-                if (strlen(expected_name) > 0 && strcasecmp(ent->d_name, expected_name) == 0) {
-                    strncpy(best_exe, subpath, max_len - 1);
-                    best_exe[max_len - 1] = '\0';
-                    closedir(d);
-                    return 1;
-                }
-                if (strlen(best_exe) == 0) {
-                    strncpy(best_exe, subpath, max_len - 1);
-                    best_exe[max_len - 1] = '\0';
+                find_target_executable_recursive(subpath, preferred_app, stripped_app, best_exe, best_score, depth + 1);
+            } else {
+                int sc = score_candidate_exe(ent->d_name, preferred_app, stripped_app);
+                if (sc > *best_score) {
+                    *best_score = sc;
+                    strncpy(best_exe, subpath, 1023);
+                    best_exe[1023] = '\0';
                 }
             }
         }
     }
     closedir(d);
-    return (strlen(best_exe) > 0);
 }
 
 static int find_target_executable(const char *dir_path, const char *preferred_base, char *out_exe, size_t max_len) {
     out_exe[0] = '\0';
-    return find_target_executable_recursive(dir_path, preferred_base, out_exe, max_len, 0);
+    char stripped_app[128] = {0};
+    if (preferred_base) {
+        strip_app_suffix(preferred_base, stripped_app, sizeof(stripped_app));
+    }
+    int best_score = 0;
+    char best_path[1024] = {0};
+    find_target_executable_recursive(dir_path, preferred_base ? preferred_base : "", stripped_app, best_path, &best_score, 0);
+    if (best_score > 0 && best_path[0] != '\0') {
+        strncpy(out_exe, best_path, max_len - 1);
+        out_exe[max_len - 1] = '\0';
+        return 1;
+    }
+    return 0;
 }
+
 
 /* Fallback Embedded HTML Dashboard */
 const char *admin_get_embedded_html(void) {
@@ -1314,17 +1488,30 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         if (strlen(app_name) == 0) {
             get_query_param(req->query, "app", app_name, sizeof(app_name));
         }
+        if (strlen(app_name) == 0 && req->body) {
+            get_body_param(req->body, "name", app_name, sizeof(app_name));
+            if (strlen(app_name) == 0) {
+                get_body_param(req->body, "app", app_name, sizeof(app_name));
+            }
+        }
         if (strlen(app_name) == 0 || !sanitize_name(app_name)) {
             return http_send_error(sock, 400, "Invalid application folder name");
         }
 
         char app_dir[1024];
         snprintf(app_dir, sizeof(app_dir), "%s/%s", ctx->updates_dir, app_name);
-        delete_directory_recursive(app_dir);
 
-        log_msg("INFO", "Deleted entire application package: %s", app_name);
-        return http_send_json(sock, 200, "{\"success\": true, \"message\": \"Entire application package deleted successfully.\"}\n");
+        int del_rc = delete_directory_recursive(app_dir);
+        struct stat check_st;
+        if (del_rc != 0 || stat(app_dir, &check_st) == 0) {
+            log_msg("ERROR", "Failed to delete application folder from disk: %s", app_dir);
+            return http_send_json(sock, 500, "{\"success\": false, \"message\": \"Failed to delete application folder from disk. Access denied or files locked.\"}\n");
+        }
+
+        log_msg("INFO", "Deleted entire application package from disk: %s", app_name);
+        return http_send_json(sock, 200, "{\"success\": true, \"message\": \"Entire application package deleted successfully from disk.\"}\n");
     }
+
 
     /* 6. API: List Files in Updates Repository (Supports Filtering by App Folder) */
     if (strcmp(req->path, "/api/files") == 0) {
@@ -1534,63 +1721,83 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         }
 
         if (!req->body || req->body_len < 22) {
-            return http_send_error(sock, 400, "Empty or invalid zip file uploaded");
+            return http_send_error(sock, 400, "Empty or invalid package file uploaded");
         }
 
         char app_dir[1024];
         snprintf(app_dir, sizeof(app_dir), "%s/%s", ctx->updates_dir, app_name);
         MKDIR(app_dir);
 
-        /* Save as persistent <app_name>.zip */
+        int is_raw_exe = (req->body_len >= 64 && (unsigned char)req->body[0] == 'M' && (unsigned char)req->body[1] == 'Z');
+
         char zip_filename[256];
-        snprintf(zip_filename, sizeof(zip_filename), "%s.zip", app_name);
-
         char zip_dest_path[1024];
-        snprintf(zip_dest_path, sizeof(zip_dest_path), "%s/%s", app_dir, zip_filename);
-
-        FILE *zf = fopen(zip_dest_path, "wb");
-        if (!zf) {
-            return http_send_error(sock, 500, "Cannot write update zip file to disk");
-        }
-        fwrite(req->body, 1, req->body_len, zf);
-        fclose(zf);
-
-        /* Calculate SHA256 and MD5 of the zip */
-        char sha256_hex[65] = {0};
-        char md5_hex[33] = {0};
-        sha256_file(zip_dest_path, sha256_hex);
-        md5_file(zip_dest_path, md5_hex);
-
-        /* Unpack into temporary directory to detect executable and version */
-        char temp_unpack_dir[1024];
-        snprintf(temp_unpack_dir, sizeof(temp_unpack_dir), "%s/_tmp_%lu", app_dir, (unsigned long)time(NULL));
-        MKDIR(temp_unpack_dir);
-
         char detected_version[64] = {0};
         char detected_exe_name[256] = "Not found";
         pe_details_t pe_info;
         memset(&pe_info, 0, sizeof(pe_info));
 
-        log_msg("INFO", "Unpacking package for application '%s' to inspect binary...", app_name);
-        if (extract_zip_archive(zip_dest_path, temp_unpack_dir, app_name) == 0) {
-            char found_exe_path[1024] = {0};
-            if (find_target_executable(temp_unpack_dir, app_name, found_exe_path, sizeof(found_exe_path))) {
-                const char *s = strrchr(found_exe_path, '/');
-                if (!s) s = strrchr(found_exe_path, '\\');
-                if (s) strncpy(detected_exe_name, s + 1, sizeof(detected_exe_name) - 1);
-                else strncpy(detected_exe_name, found_exe_path, sizeof(detected_exe_name) - 1);
+        if (is_raw_exe) {
+            /* Direct .EXE binary upload */
+            snprintf(zip_filename, sizeof(zip_filename), "%s.exe", app_name);
+            snprintf(zip_dest_path, sizeof(zip_dest_path), "%s/%s", app_dir, zip_filename);
 
-                if (inspect_pe_executable(found_exe_path, &pe_info) == 0) {
-                    strncpy(detected_version, pe_info.file_version, sizeof(detected_version) - 1);
-                    log_msg("INFO", "PE Analysis complete: %s", pe_info.summary);
-                }
-            } else {
-                log_msg("WARN", "No suitable .exe binary found in package for '%s'", app_name);
+            FILE *ef = fopen(zip_dest_path, "wb");
+            if (!ef) {
+                return http_send_error(sock, 500, "Cannot write executable binary to disk");
+            }
+            fwrite(req->body, 1, req->body_len, ef);
+            fclose(ef);
+
+            strncpy(detected_exe_name, zip_filename, sizeof(detected_exe_name) - 1);
+            if (inspect_pe_executable(zip_dest_path, &pe_info) == 0) {
+                strncpy(detected_version, pe_info.file_version, sizeof(detected_version) - 1);
+                log_msg("INFO", "Direct EXE PE Analysis complete: %s", pe_info.summary);
             }
         } else {
-            log_msg("WARN", "Zip extraction failed or timed out for '%s'", app_name);
+            /* ZIP archive package upload */
+            snprintf(zip_filename, sizeof(zip_filename), "%s.zip", app_name);
+            snprintf(zip_dest_path, sizeof(zip_dest_path), "%s/%s", app_dir, zip_filename);
+
+            FILE *zf = fopen(zip_dest_path, "wb");
+            if (!zf) {
+                return http_send_error(sock, 500, "Cannot write update zip file to disk");
+            }
+            fwrite(req->body, 1, req->body_len, zf);
+            fclose(zf);
+
+            /* Unpack into temporary directory to detect executable and version */
+            char temp_unpack_dir[1024];
+            snprintf(temp_unpack_dir, sizeof(temp_unpack_dir), "%s/_tmp_%lu", app_dir, (unsigned long)time(NULL));
+            MKDIR(temp_unpack_dir);
+
+            log_msg("INFO", "Unpacking package for application '%s' to inspect binary...", app_name);
+            if (extract_zip_archive(zip_dest_path, temp_unpack_dir, app_name) == 0) {
+                char found_exe_path[1024] = {0};
+                if (find_target_executable(temp_unpack_dir, app_name, found_exe_path, sizeof(found_exe_path))) {
+                    const char *s = strrchr(found_exe_path, '/');
+                    if (!s) s = strrchr(found_exe_path, '\\');
+                    if (s) strncpy(detected_exe_name, s + 1, sizeof(detected_exe_name) - 1);
+                    else strncpy(detected_exe_name, found_exe_path, sizeof(detected_exe_name) - 1);
+
+                    if (inspect_pe_executable(found_exe_path, &pe_info) == 0) {
+                        strncpy(detected_version, pe_info.file_version, sizeof(detected_version) - 1);
+                        log_msg("INFO", "PE Analysis complete: %s", pe_info.summary);
+                    }
+                } else {
+                    log_msg("WARN", "No suitable .exe binary found in package for '%s'", app_name);
+                }
+            } else {
+                log_msg("WARN", "Zip extraction failed or timed out for '%s'", app_name);
+            }
+            delete_directory_recursive(temp_unpack_dir);
         }
-        delete_directory_recursive(temp_unpack_dir);
+
+        /* Calculate SHA256 and MD5 of the package (either zip or exe) */
+        char sha256_hex[65] = {0};
+        char md5_hex[33] = {0};
+        sha256_file(zip_dest_path, sha256_hex);
+        md5_file(zip_dest_path, md5_hex);
 
         /* If no exe was analyzed, fill defaults */
         if (pe_info.exe_name[0] == '\0') {
@@ -1814,6 +2021,30 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         get_query_param(req->query, "app", app_name, sizeof(app_name));
         get_query_param(req->query, "name", filename, sizeof(filename));
 
+        if (strlen(filename) == 0 && req->body) {
+            get_body_param(req->body, "name", filename, sizeof(filename));
+            if (strlen(app_name) == 0) {
+                get_body_param(req->body, "app", app_name, sizeof(app_name));
+            }
+        }
+
+        if (strlen(filename) == 0) {
+            /* If no filename specified, check if full app folder was requested */
+            if (strlen(app_name) > 0 && sanitize_name(app_name)) {
+                char app_dir[1024];
+                snprintf(app_dir, sizeof(app_dir), "%s/%s", ctx->updates_dir, app_name);
+                int del_rc = delete_directory_recursive(app_dir);
+                struct stat check_st;
+                if (del_rc != 0 || stat(app_dir, &check_st) == 0) {
+                    log_msg("ERROR", "Failed to delete application folder from disk: %s", app_dir);
+                    return http_send_json(sock, 500, "{\"success\": false, \"message\": \"Failed to delete application folder from disk.\"}\n");
+                }
+                log_msg("INFO", "Deleted application folder from disk: %s", app_name);
+                return http_send_json(sock, 200, "{\"success\": true, \"message\": \"Application folder deleted successfully.\"}\n");
+            }
+            return http_send_error(sock, 400, "Filename or application name is required");
+        }
+
         if (!sanitize_name(filename)) {
             return http_send_error(sock, 400, "Invalid filename");
         }
@@ -1825,9 +2056,41 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             snprintf(target_path, sizeof(target_path), "%s/%s", ctx->updates_dir, filename);
         }
 
-        unlink(target_path);
+        struct stat st;
+        if (stat(target_path, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                delete_directory_recursive(target_path);
+            } else {
+#ifdef _WIN32
+                SetFileAttributesA(target_path, FILE_ATTRIBUTE_NORMAL);
+                if (DeleteFileA(target_path) == 0) {
+                    remove(target_path);
+                }
+#else
+                chmod(target_path, 0777);
+                unlink(target_path);
+                remove(target_path);
+#endif
+            }
+        } else {
+#ifdef _WIN32
+            SetFileAttributesA(target_path, FILE_ATTRIBUTE_NORMAL);
+            if (DeleteFileA(target_path) == 0) {
+                remove(target_path);
+            }
+#else
+            unlink(target_path);
+            remove(target_path);
+#endif
+        }
 
-        log_msg("INFO", "File deleted: %s", target_path);
+        struct stat check_st;
+        if (stat(target_path, &check_st) == 0) {
+            log_msg("ERROR", "Failed to delete file/folder from disk: %s", target_path);
+            return http_send_json(sock, 500, "{\"success\": false, \"message\": \"Failed to delete file from disk. Access denied or file locked.\"}\n");
+        }
+
+        log_msg("INFO", "File deleted from disk: %s", target_path);
         return http_send_json(sock, 200, "{\"success\": true, \"message\": \"File deleted successfully.\"}\n");
     }
 
