@@ -1,4 +1,4 @@
-﻿# AutoUpdate-Server
+# AutoUpdate-Server
 ### High-Performance, Zero-Dependency Offline Web Server for AutoUpdater.NET
 
 [![GitHub Organization](https://img.shields.io/badge/Organization-AIKICo-blue)](https://github.com/AIKICo)

@@ -47,14 +47,12 @@ copy /y "%SRC_DIR%\install_service.sh" "%OUT_DIR%\" >nul
 copy /y "%SRC_DIR%\autoupdater.service" "%OUT_DIR%\" >nul
 copy /y "%SRC_DIR%\Dockerfile.linux-x64" "%OUT_DIR%\Dockerfile" >nul
 
-(
-  echo [server]
-  echo port = 8000
-  echo updates_dir = ./updates
-  echo webroot_dir = ./webroot
-) > "%OUT_DIR%\config.ini"
+copy /y "%SRC_DIR%\config.ini" "%OUT_DIR%\" >nul
 
-echo [5/5] Creating distribution archives (.zip and .tar.gz)...
+echo [5/6] Ensuring all scripts and text files use pure UNIX (LF) line endings...
+powershell -NoProfile -Command "$files = Get-ChildItem -Path '%OUT_DIR%' -Recurse -File | Where-Object { $_.Extension -notin @('.exe', '.dll', '.so', '.a', '.gz', '.zip', '.png', '.jpg', '.ico', '.db') -and $_.Name -ne 'autoupdate-server' }; foreach ($f in $files) { $bytes = [System.IO.File]::ReadAllBytes($f.FullName); $hasCR = $false; for ($i = 0; $i -lt $bytes.Length; $i++) { if ($bytes[$i] -eq 13) { $hasCR = $true; break } }; if ($hasCR) { $text = [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8); $fixed = $text.Replace(\"`r`n\", \"`n\").Replace(\"`r\", \"`n\"); [System.IO.File]::WriteAllText($f.FullName, $fixed, (New-Object System.Text.UTF8Encoding($false))) } }"
+
+echo [6/6] Creating distribution archives (.zip and .tar.gz)...
 powershell -NoProfile -Command "Compress-Archive -Path '%OUT_DIR%\*' -DestinationPath '%OUT_ZIP%' -Force"
 powershell -NoProfile -Command "Set-Location '%SCRIPT_DIR%publish'; tar -czf '%SCRIPT_DIR%publish\autoupdate-server-linux-x64.tar.gz' -C '%SCRIPT_DIR%publish' linux-x64"
 copy /y "%SCRIPT_DIR%publish\autoupdate-server-linux-x64.tar.gz" "%SCRIPT_DIR%autoupdate-server-linux-x64.tar.gz" >nul
