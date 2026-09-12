@@ -250,7 +250,7 @@ int zip_list_executable_entries(const char *zip_path, const char *preferred_app,
         if (fread(name, 1, to_read, f) != to_read) break;
         name[to_read] = '\0';
         if (name_len > to_read) {
-            fseek(f, name_len - to_read, SEEK_CUR);
+            fseek(f, (long)(name_len - to_read), SEEK_CUR);
         }
 
         if (extra_len + comment_len > 0) {
@@ -395,7 +395,7 @@ int zip_extract_entry(const char *zip_path, const char *entry_name, const char *
         if (fread(name, 1, to_read, f) != to_read) break;
         name[to_read] = '\0';
         if (name_len > to_read) {
-            fseek(f, name_len - to_read, SEEK_CUR);
+            fseek(f, (long)(name_len - to_read), SEEK_CUR);
         }
         if (extra_len + comment_len > 0) {
             fseek(f, extra_len + comment_len, SEEK_CUR);
@@ -544,7 +544,7 @@ int zip_extract_all(const char *zip_path, const char *dest_dir) {
         if (fread(entries[valid_count].name, 1, to_read, f) != to_read) break;
         entries[valid_count].name[to_read] = '\0';
         if (name_len > to_read) {
-            fseek(f, name_len - to_read, SEEK_CUR);
+            fseek(f, (long)(name_len - to_read), SEEK_CUR);
         }
         if (extra_len + comment_len > 0) {
             fseek(f, extra_len + comment_len, SEEK_CUR);

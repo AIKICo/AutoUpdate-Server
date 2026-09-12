@@ -171,9 +171,11 @@
     <ClCompile Include="src\http.c" />
     <ClCompile Include="src\main.c" />
     <ClCompile Include="src\md5.c" />
+    <ClCompile Include="src\puff.c" />
     <ClCompile Include="src\server.c" />
     <ClCompile Include="src\sha256.c" />
     <ClCompile Include="src\utils.c" />
+    <ClCompile Include="src\zip_reader.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\admin.h" />
@@ -181,9 +183,11 @@
     <ClInclude Include="src\db.h" />
     <ClInclude Include="src\http.h" />
     <ClInclude Include="src\md5.h" />
+    <ClInclude Include="src\puff.h" />
     <ClInclude Include="src\server.h" />
     <ClInclude Include="src\sha256.h" />
     <ClInclude Include="src\utils.h" />
+    <ClInclude Include="src\zip_reader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
