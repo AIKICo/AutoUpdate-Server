@@ -989,6 +989,11 @@
       background: rgba(99, 102, 241, 0.1);
     }
 
+    .pkg-copy-btn.copied, .btn.copied {
+      color: var(--success) !important;
+      border-color: var(--success) !important;
+    }
+
     .pkg-catalog-link {
       display: flex;
       align-items: center;
@@ -2285,19 +2290,100 @@
       if (tabId === 'tab-settings') loadSettings();
     }
 
-    // Clipboard Copy Helper
+    // Robust Clipboard Copy Helper (supports both HTTPS and HTTP non-secure contexts)
+    function fallbackCopyTextToClipboard(text) {
+      let successful = false;
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      
+      // Ensure element is hidden, fixed, and doesn't trigger scroll
+      textArea.style.position = 'fixed';
+      textArea.style.top = '0';
+      textArea.style.left = '0';
+      textArea.style.width = '2em';
+      textArea.style.height = '2em';
+      textArea.style.padding = '0';
+      textArea.style.border = 'none';
+      textArea.style.outline = 'none';
+      textArea.style.boxShadow = 'none';
+      textArea.style.background = 'transparent';
+      textArea.style.opacity = '0.01';
+      textArea.style.zIndex = '-9999';
+      textArea.setAttribute('readonly', '');
+      
+      document.body.appendChild(textArea);
+      
+      try {
+        textArea.focus({ preventScroll: true });
+        textArea.select();
+        textArea.setSelectionRange(0, text.length || 99999);
+        successful = document.execCommand('copy');
+      } catch (err) {
+        console.warn('execCommand copy error:', err);
+        successful = false;
+      }
+      
+      document.body.removeChild(textArea);
+      return successful;
+    }
+
     function copyText(text, btn) {
-      if (!text) return;
-      navigator.clipboard.writeText(text).then(() => {
+      if (text === null || text === undefined) {
+        showToast('Nothing to copy', 'warning');
+        return;
+      }
+      text = String(text).trim();
+      if (!text || text === '-') {
+        showToast('Nothing to copy', 'warning');
+        return;
+      }
+
+      function onCopySuccess() {
         showToast('Copied to clipboard!', 'success');
         if (btn) {
-          const orig = btn.innerText;
-          btn.innerText = 'Copied!';
-          setTimeout(() => btn.innerText = orig, 1800);
+          const origHtml = btn.innerHTML;
+          const span = btn.querySelector('span');
+          if (span) {
+            span.innerText = 'Copied!';
+          } else {
+            btn.innerText = 'Copied!';
+          }
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.innerHTML = origHtml;
+            btn.classList.remove('copied');
+          }, 1800);
         }
-      }).catch(err => {
-        showToast('Failed to copy: ' + err, 'error');
-      });
+      }
+
+      function onCopyFailure() {
+        try {
+          window.prompt('Copy to clipboard: Ctrl+C, Enter', text);
+        } catch (e) {
+          showToast('Failed to copy to clipboard', 'error');
+        }
+      }
+
+      // If in a secure context with navigator.clipboard support, use standard API
+      if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text)
+          .then(onCopySuccess)
+          .catch(() => {
+            // If rejected (e.g. permission denied), fallback to execCommand
+            if (fallbackCopyTextToClipboard(text)) {
+              onCopySuccess();
+            } else {
+              onCopyFailure();
+            }
+          });
+      } else {
+        // HTTP / Non-Secure Context (common when accessing server via LAN IP address)
+        if (fallbackCopyTextToClipboard(text)) {
+          onCopySuccess();
+        } else {
+          onCopyFailure();
+        }
+      }
     }
 
     // Authentication
