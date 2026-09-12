@@ -1694,10 +1694,30 @@
                     <select id="pubAppSelect" class="form-control" style="max-width:170px; cursor:pointer;" onchange="onSelectExistingApp(this.value)" title="Choose from already registered applications">
                       <option value="">-- Choose App --</option>
                     </select>
+                    <button type="button" id="btnClearApp" class="btn btn-secondary btn-sm" onclick="clearAppSelection()" title="Deselect and clear target application" style="display:inline-flex; align-items:center; gap:4px; padding:0 12px; font-size:0.8rem; white-space:nowrap;">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      <span>Clear</span>
+                    </button>
                   </div>
                   <div id="existingAppsPills" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; min-height:26px;">
                     <!-- Populated dynamically via loadAppsList() -->
                   </div>
+
+                  <!-- App / File Mismatch & Overwrite Warning Banner -->
+                  <div id="appMismatchBanner" style="display:none; margin-top:10px; padding:10px 14px; border-radius:8px; background:rgba(234, 179, 8, 0.12); border:1px solid rgba(234, 179, 8, 0.35); color:var(--text-main); font-size:0.82rem; animation:fadeIn 0.2s ease;">
+                    <div style="display:flex; align-items:flex-start; gap:10px;">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                      <div style="flex:1;">
+                        <div style="font-weight:600; color:var(--warning); margin-bottom:2px;">Target Application Mismatch Warning</div>
+                        <div>You chose file <code id="mismatchFileName" style="color:var(--accent-cyan); font-weight:600;"></code>, but the destination is set to <code id="mismatchAppName" style="color:var(--warning); font-weight:600;"></code>. Publishing will <strong>OVERWRITE</strong> the existing application!</div>
+                        <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                          <button type="button" class="btn btn-primary btn-sm" onclick="applyPackageNameAsApp()" style="font-size:0.75rem; padding:4px 10px;">Switch App to "<span id="mismatchSuggestedName"></span>"</button>
+                          <button type="button" class="btn btn-secondary btn-sm" onclick="dismissMismatchWarning()" style="font-size:0.75rem; padding:4px 10px;">Keep "<span id="mismatchTargetName"></span>" (Overwrite)</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div style="margin-top:6px; font-size:0.8rem; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                     <span>Catalog Target:</span>
                     <code id="previewCatalogUrl" style="background:var(--code-bg); padding:2px 8px; border-radius:4px; border:1px solid var(--border-subtle); color:var(--accent-cyan); font-size:0.78rem;">http://localhost:8000/&lt;AppName&gt;/AutoUpdater.xml</code>
@@ -1722,6 +1742,7 @@
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                     <span id="selectedFileName">package.zip</span>
                     <span id="selectedFileSize" style="color:var(--text-muted); font-size:0.8rem;">(0 MB)</span>
+                    <button type="button" onclick="clearSelectedFile(event)" title="Remove selected file" style="background:transparent; border:none; color:var(--danger); cursor:pointer; font-size:1rem; line-height:1; padding:0 4px; margin-left:6px;">&times;</button>
                   </div>
                 </div>
               </div>
@@ -1916,6 +1937,18 @@
                   <button class="btn btn-secondary btn-sm" onclick="copyText(document.getElementById('resCSharpCode').innerText, this)">Copy Code</button>
                 </div>
                 <pre class="mono" id="resCSharpCode" style="background:var(--code-bg); padding:14px; border-radius:8px; border:1px solid var(--border-subtle); color:var(--text-secondary); font-size:0.8rem; overflow-x:auto; line-height:1.5;"></pre>
+              </div>
+
+              <!-- Next Action Bar -->
+              <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <span style="font-size:0.84rem; color:var(--success); display:inline-flex; align-items:center; gap:6px;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  Release is active and live. Form reset for next upload.
+                </span>
+                <button type="button" class="btn btn-primary btn-sm" onclick="resetPublishForm(true)" style="display:inline-flex; align-items:center; gap:6px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Upload Another Package
+                </button>
               </div>
             </div>
           </div>
@@ -2174,6 +2207,8 @@
     let gCurrentPort = 8000;
     let gSelectedZipFile = null;
     let gPackagesCache = [];
+    let gRegisteredAppsCache = [];
+    let gMismatchDismissedFor = null;
     let gDeleteTargetApp = null;
 
     // Theme Management
@@ -2502,11 +2537,121 @@
       document.getElementById('selectedFileSize').innerText = `(${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
       document.getElementById('selectedFileChip').style.display = 'inline-flex';
 
+      const cleanName = file.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
       const appInput = document.getElementById('pubAppName');
+
       if (!appInput.value) {
-        const cleanName = file.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+        // If app name was empty, auto-populate it with the package base name
         appInput.value = cleanName;
         onAppNameInput(cleanName);
+      } else {
+        // App was already chosen; check if there is an unintentional mismatch/overwrite
+        checkAppFileMismatch(cleanName);
+      }
+    }
+
+    function clearSelectedFile(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      gSelectedZipFile = null;
+      const fileInput = document.getElementById('zipFileInput');
+      if (fileInput) fileInput.value = '';
+      const dropPrompt = document.getElementById('dropPrompt');
+      if (dropPrompt) dropPrompt.style.display = 'block';
+      const fileChip = document.getElementById('selectedFileChip');
+      if (fileChip) fileChip.style.display = 'none';
+      checkAppFileMismatch();
+    }
+
+    function checkAppFileMismatch(optCleanName) {
+      const appInput = document.getElementById('pubAppName');
+      const currentApp = appInput ? appInput.value.trim() : '';
+      const banner = document.getElementById('appMismatchBanner');
+      if (!banner) return;
+
+      if (!gSelectedZipFile || !currentApp) {
+        banner.style.display = 'none';
+        return;
+      }
+
+      const fileBaseName = optCleanName || gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+
+      // Check if file name matches or starts with app name (e.g. App-win-x64, App-v1.2)
+      const curLower = currentApp.toLowerCase();
+      const fileLower = fileBaseName.toLowerCase();
+      const isExact = (fileLower === curLower);
+      const isRelated = fileLower.startsWith(curLower) || curLower.startsWith(fileLower);
+
+      if (isExact || isRelated || gMismatchDismissedFor === `${currentApp}::${fileBaseName}`) {
+        banner.style.display = 'none';
+      } else {
+        const mismatchFile = document.getElementById('mismatchFileName');
+        const mismatchApp = document.getElementById('mismatchAppName');
+        const suggestedName = document.getElementById('mismatchSuggestedName');
+        const targetName = document.getElementById('mismatchTargetName');
+        if (mismatchFile) mismatchFile.innerText = gSelectedZipFile.name;
+        if (mismatchApp) mismatchApp.innerText = currentApp;
+        if (suggestedName) suggestedName.innerText = fileBaseName;
+        if (targetName) targetName.innerText = currentApp;
+        banner.style.display = 'block';
+      }
+    }
+
+    function applyPackageNameAsApp() {
+      if (!gSelectedZipFile) return;
+      const cleanName = gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+      const appInput = document.getElementById('pubAppName');
+      if (appInput) {
+        appInput.value = cleanName;
+        onAppNameInput(cleanName);
+      }
+      dismissMismatchWarning();
+    }
+
+    function dismissMismatchWarning() {
+      const banner = document.getElementById('appMismatchBanner');
+      if (banner) banner.style.display = 'none';
+      const appInput = document.getElementById('pubAppName');
+      if (appInput && gSelectedZipFile) {
+        const cleanName = gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+        gMismatchDismissedFor = `${appInput.value.trim()}::${cleanName}`;
+      }
+    }
+
+    function clearAppSelection() {
+      const appInput = document.getElementById('pubAppName');
+      if (appInput) appInput.value = '';
+      const sel = document.getElementById('pubAppSelect');
+      if (sel) sel.value = '';
+      highlightActiveAppPill('');
+      updateCatalogPreview('');
+      gMismatchDismissedFor = null;
+      const banner = document.getElementById('appMismatchBanner');
+      if (banner) banner.style.display = 'none';
+    }
+
+    function resetPublishForm(focusInput = false) {
+      clearSelectedFile();
+      clearAppSelection();
+      const verInput = document.getElementById('pubCustomVer');
+      if (verInput) verInput.value = '';
+      const mandatoryCheckbox = document.getElementById('pubMandatory');
+      if (mandatoryCheckbox) mandatoryCheckbox.checked = false;
+      
+      const btn = document.getElementById('btnPublish');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Publish Package';
+      }
+
+      if (focusInput) {
+        const appInput = document.getElementById('pubAppName');
+        if (appInput) {
+          appInput.focus();
+          appInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
     }
 
@@ -2722,6 +2867,20 @@
         return;
       }
 
+      // Safety confirmation: If app already exists on server and package name differs, warn user explicitly
+      const fileBaseName = gSelectedZipFile.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9_\-\.]/g, '');
+      const curLower = app.toLowerCase();
+      const fileLower = fileBaseName.toLowerCase();
+      const isExact = (fileLower === curLower);
+      const isRelated = fileLower.startsWith(curLower) || curLower.startsWith(fileLower);
+
+      if (gRegisteredAppsCache && gRegisteredAppsCache.includes(app) && !isExact && !isRelated) {
+        const proceed = window.confirm(`⚠️ Overwrite Warning:\n\nYou are publishing "${gSelectedZipFile.name}" into application "${app}".\n\nThis will OVERWRITE the release catalog and package for "${app}".\n\nAre you sure you want to overwrite "${app}"?`);
+        if (!proceed) {
+          return;
+        }
+      }
+
       const btn = document.getElementById('btnPublish');
       btn.disabled = true;
       btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg> Publishing...';
@@ -2769,6 +2928,10 @@
             const res = JSON.parse(xhr.responseText);
             completePublishPipeline(res);
             showToast('Package published successfully!', 'success');
+            
+            // Automatically clear & deselect the form so the NEXT upload will not accidentally overwrite!
+            resetPublishForm(false);
+
             loadAppsList();
           } catch (e) {
             resetPublishPipeline();
@@ -2895,17 +3058,29 @@ AutoUpdater.Start("${data.xml_url}");`;
     }
 
     function onSelectExistingApp(val) {
-      if (!val) return;
       const appInput = document.getElementById('pubAppName');
+      const sel = document.getElementById('pubAppSelect');
+
+      // Toggle-off: If clicking the currently selected app again, deselect it
+      if (appInput && appInput.value === val) {
+        clearAppSelection();
+        return;
+      }
+
+      if (!val) {
+        clearAppSelection();
+        return;
+      }
+
       if (appInput) {
         appInput.value = val;
         updateCatalogPreview(val);
         highlightActiveAppPill(val);
       }
-      const sel = document.getElementById('pubAppSelect');
       if (sel) {
         sel.value = Array.from(sel.options).some(o => o.value === val) ? val : '';
       }
+      checkAppFileMismatch();
     }
 
     function onAppNameInput(val) {
@@ -2916,6 +3091,7 @@ AutoUpdater.Start("${data.xml_url}");`;
         sel.value = match ? val : '';
       }
       highlightActiveAppPill(val);
+      checkAppFileMismatch();
     }
 
     function highlightActiveAppPill(val) {
@@ -3031,6 +3207,7 @@ AutoUpdater.Start("${data.xml_url}");`;
         const res = await fetch('/api/apps');
         if (res.ok) {
           const apps = await res.json();
+          gRegisteredAppsCache = Array.isArray(apps) ? apps : [];
 
           // 1. Packages filter dropdown
           const sel = document.getElementById('pkgFilterApp');
