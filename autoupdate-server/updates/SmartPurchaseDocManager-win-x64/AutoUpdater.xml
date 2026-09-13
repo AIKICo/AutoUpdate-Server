@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <item>
-    <version>1.0.9748.35239</version>
+    <version>1.0.9752.38</version>
     <url>http://localhost:8000/SmartPurchaseDocManager-win-x64/SmartPurchaseDocManager-win-x64.zip</url>
     <changelog>http://localhost:8000/SmartPurchaseDocManager-win-x64/changelog.html</changelog>
     <mandatory>false</mandatory>
-    <checksum algorithm="SHA256">a73f0f2cce9810696289d38554aa7121508ce87d0366d4d0e1fc9494de4f03ac</checksum>
+    <executable>SmartPurchaseDocManager.exe</executable>
+    <checksum algorithm="SHA256">a15fc5ac90434ef2e0270e25d4a16391e71e3ee0acb547c266ad704939e56439</checksum>
 </item>

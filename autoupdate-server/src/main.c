@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "compat.h"
 #include "db.h"
+#include "admin.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -189,6 +190,27 @@ int main(int argc, char *argv[]) {
             return stop_daemon(PID_FILE);
         } else if (strcmp(argv[1], "status") == 0) {
             return check_status(PID_FILE);
+        } else if (strcmp(argv[1], "--inspect") == 0 && argc >= 3) {
+            pe_details_t details;
+            if (inspect_pe_executable(argv[2], &details) == 0) {
+                printf("========================================================\n");
+                printf("  Executable Inspection (PE Analyzer)\n");
+                printf("========================================================\n");
+                printf("Executable:       %s\n", details.exe_name);
+                printf("File Version:     %s\n", details.file_version);
+                printf("Product Version:  %s\n", details.product_version);
+                printf("Description:      %s\n", details.file_description);
+                printf("Company:          %s\n", details.company_name);
+                printf("Architecture:     %s\n", details.architecture);
+                printf("Subsystem:        %s\n", details.subsystem);
+                printf("Runtime:          %s\n", details.runtime);
+                printf("Method:           %s\n", details.detection_method);
+                printf("Summary:          %s\n", details.summary);
+                return 0;
+            } else {
+                fprintf(stderr, "Failed to inspect executable: %s\n", argv[2]);
+                return 1;
+            }
         } else if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             print_usage(argv[0]);
             return 0;

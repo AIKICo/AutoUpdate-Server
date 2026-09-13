@@ -51,7 +51,7 @@ echo title AutoUpdate-Server v2.0
 echo cd /d "%%~dp0"
 echo.
 echo ==============================================================================
-echo   AutoUpdate-Server (High-Performance C Server for AutoUpdater.NET)
+echo   AutoUpdate-Server ^(High-Performance C Server for AutoUpdater.NET^)
 echo ==============================================================================
 echo.
 echo Starting web server on port 8000...

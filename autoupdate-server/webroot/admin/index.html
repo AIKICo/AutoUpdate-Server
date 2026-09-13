@@ -1721,6 +1721,10 @@
                 </div>
                 <div class="card-subtitle">Upload your application ZIP archive. The server automatically unpacks the archive, inspects executable version and PE headers, computes cryptographic checksums, and updates AutoUpdater.xml in place.</div>
               </div>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="resetPublishForm(true, true)" title="Clear previous release information and start a new package" style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap; padding:8px 14px; font-size:0.84rem;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                <span>New Package (ایجاد بسته جدید)</span>
+              </button>
             </div>
 
             <form id="publishForm" onsubmit="handlePublishZip(event)">
@@ -2033,7 +2037,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                   Release is active and live. Form reset for next upload.
                 </span>
-                <button type="button" class="btn btn-primary btn-sm" onclick="resetPublishForm(true)" style="display:inline-flex; align-items:center; gap:6px;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="resetPublishForm(true, true)" style="display:inline-flex; align-items:center; gap:6px;">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   Upload Another Package
                 </button>
@@ -2846,6 +2850,14 @@
         showToast('Please select a valid .ZIP or .EXE package', 'warning');
         return;
       }
+
+      // Hide previous release result box & progress container when a new package is selected
+      const prevResBox = document.getElementById('releaseResultBox');
+      if (prevResBox) prevResBox.style.display = 'none';
+      const prevProgContainer = document.getElementById('uploadProgressContainer');
+      if (prevProgContainer) prevProgContainer.style.display = 'none';
+      resetPublishPipeline();
+
       gSelectedZipFile = file;
       document.getElementById('dropPrompt').style.display = 'none';
       document.getElementById('selectedFileName').innerText = file.name;
@@ -2887,6 +2899,10 @@
       if (fileChip) fileChip.style.display = 'none';
       const exeContainer = document.getElementById('exeSelectionContainer');
       if (exeContainer) exeContainer.style.display = 'none';
+      const candidatesList = document.getElementById('exeCandidatesList');
+      if (candidatesList) candidatesList.innerHTML = '';
+      const mismatchBanner = document.getElementById('appMismatchBanner');
+      if (mismatchBanner) mismatchBanner.style.display = 'none';
       checkAppFileMismatch();
     }
 
@@ -2957,7 +2973,7 @@
       if (banner) banner.style.display = 'none';
     }
 
-    function resetPublishForm(focusInput = false) {
+    function resetPublishForm(focusInput = false, hideResult = true) {
       clearSelectedFile();
       clearAppSelection();
       const verInput = document.getElementById('pubCustomVer');
@@ -2969,6 +2985,14 @@
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Publish Package';
+      }
+
+      if (hideResult) {
+        const resBox = document.getElementById('releaseResultBox');
+        if (resBox) resBox.style.display = 'none';
+        const progContainer = document.getElementById('uploadProgressContainer');
+        if (progContainer) progContainer.style.display = 'none';
+        resetPublishPipeline();
       }
 
       if (focusInput) {
@@ -3258,7 +3282,7 @@
             showToast('Package published successfully!', 'success');
             
             // Automatically clear & deselect the form so the NEXT upload will not accidentally overwrite!
-            resetPublishForm(false);
+            resetPublishForm(false, false);
 
             loadAppsList();
           } catch (e) {

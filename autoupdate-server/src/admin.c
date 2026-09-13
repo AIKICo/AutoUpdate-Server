@@ -337,6 +337,212 @@ static int pe_find_utf16_val(const unsigned char *data, size_t len, const char *
     return 0;
 }
 
+static const char *str_case_contains(const char *haystack, const char *needle);
+
+/* Clean and normalize version string (remove 'v', git commit hashes like +sha or @sha, spaces, replace commas with dots) */
+static void sanitize_version_string(char *ver, size_t max_len) {
+    if (!ver || max_len == 0) return;
+    char *p = ver;
+    while (*p == ' ' || *p == '\t' || *p == 'v' || *p == 'V') p++;
+    if (p != ver) memmove(ver, p, strlen(p) + 1);
+
+    char *plus = strchr(ver, '+');
+    if (plus) *plus = '\0';
+    char *at = strchr(ver, '@');
+    if (at) *at = '\0';
+    char *space = strchr(ver, ' ');
+    if (space) *space = '\0';
+
+    for (size_t i = 0; ver[i]; i++) {
+        if (ver[i] == ',') ver[i] = '.';
+    }
+
+    size_t len = strlen(ver);
+    while (len > 0 && (ver[len - 1] == '.' || ver[len - 1] == ' ' || ver[len - 1] == '\r' || ver[len - 1] == '\n')) {
+        ver[--len] = '\0';
+    }
+}
+
+/* Traverse PE Resource Directory to locate the RT_VERSION (type 16) data entry */
+static int pe_find_version_resource_data(const unsigned char *rdata, size_t rdata_len, uint32_t rsrc_rva,
+                                         uint32_t *out_data_offset, uint32_t *out_data_size) {
+    if (!rdata || rdata_len < 32 || !out_data_offset || !out_data_size) return 0;
+
+    /* Root Resource Directory */
+    uint16_t num_named = (uint16_t)(rdata[12] | (rdata[13] << 8));
+    uint16_t num_id = (uint16_t)(rdata[14] | (rdata[15] << 8));
+    uint32_t total_entries = (uint32_t)num_named + (uint32_t)num_id;
+
+    uint32_t rt_version_subdir_offset = 0;
+    int found_rt_ver = 0;
+
+    for (uint32_t e = 0; e < total_entries && (16 + e * 8 + 8) <= rdata_len; e++) {
+        uint32_t entry_offset = 16 + e * 8;
+        uint32_t name = (uint32_t)(rdata[entry_offset] | (rdata[entry_offset+1] << 8) |
+                                  (rdata[entry_offset+2] << 16) | (rdata[entry_offset+3] << 24));
+        uint32_t data = (uint32_t)(rdata[entry_offset+4] | (rdata[entry_offset+5] << 8) |
+                                  (rdata[entry_offset+6] << 16) | (rdata[entry_offset+7] << 24));
+
+        /* RT_VERSION has ID 16 */
+        if (name == 16 && (data & 0x80000000)) {
+            rt_version_subdir_offset = data & 0x7FFFFFFF;
+            found_rt_ver = 1;
+            break;
+        }
+    }
+
+    if (!found_rt_ver || rt_version_subdir_offset + 16 > rdata_len) return 0;
+
+    /* Level 2: Name/ID Directory */
+    const unsigned char *l2 = rdata + rt_version_subdir_offset;
+    uint16_t l2_named = (uint16_t)(l2[12] | (l2[13] << 8));
+    uint16_t l2_id = (uint16_t)(l2[14] | (l2[15] << 8));
+    if ((l2_named + l2_id) == 0 || rt_version_subdir_offset + 16 + 8 > rdata_len) return 0;
+
+    uint32_t l2_data = (uint32_t)(l2[16+4] | (l2[16+5] << 8) | (l2[16+6] << 16) | (l2[16+7] << 24));
+    uint32_t l3_offset = l2_data & 0x7FFFFFFF;
+    if (l3_offset + 16 > rdata_len) return 0;
+
+    /* Level 3: Language Directory */
+    const unsigned char *l3 = rdata + l3_offset;
+    uint16_t l3_named = (uint16_t)(l3[12] | (l3[13] << 8));
+    uint16_t l3_id = (uint16_t)(l3[14] | (l3[15] << 8));
+    if ((l3_named + l3_id) == 0 || l3_offset + 16 + 8 > rdata_len) return 0;
+
+    uint32_t data_entry_offset = (uint32_t)(l3[16+4] | (l3[16+5] << 8) | (l3[16+6] << 16) | (l3[16+7] << 24));
+    data_entry_offset &= 0x7FFFFFFF;
+    if (data_entry_offset + 16 > rdata_len) return 0;
+
+    /* PE_RESOURCE_DATA_ENTRY */
+    const unsigned char *de = rdata + data_entry_offset;
+    uint32_t data_rva = (uint32_t)(de[0] | (de[1] << 8) | (de[2] << 16) | (de[3] << 24));
+    uint32_t data_size = (uint32_t)(de[4] | (de[5] << 8) | (de[6] << 16) | (de[7] << 24));
+
+    if (data_rva < rsrc_rva) return 0;
+    uint32_t rsrc_rel_offset = data_rva - rsrc_rva;
+    if (rsrc_rel_offset >= rdata_len) return 0;
+
+    *out_data_offset = rsrc_rel_offset;
+    *out_data_size = data_size;
+    return 1;
+}
+
+#ifdef _WIN32
+static int pe_inspect_windows_native(const char *filepath, pe_details_t *details) {
+    DWORD dummy = 0;
+    DWORD size = GetFileVersionInfoSizeA(filepath, &dummy);
+    if (size == 0) return 0;
+
+    void *data = malloc(size);
+    if (!data) return 0;
+
+    int found = 0;
+    if (GetFileVersionInfoA(filepath, 0, size, data)) {
+        VS_FIXEDFILEINFO *ffi = NULL;
+        UINT len = 0;
+        if (VerQueryValueA(data, "\\", (LPVOID*)&ffi, &len) && ffi && len >= sizeof(VS_FIXEDFILEINFO)) {
+            WORD v1 = HIWORD(ffi->dwFileVersionMS);
+            WORD v2 = LOWORD(ffi->dwFileVersionMS);
+            WORD v3 = HIWORD(ffi->dwFileVersionLS);
+            WORD v4 = LOWORD(ffi->dwFileVersionLS);
+            if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
+                snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                strncpy(details->detection_method, "Windows Native API (GetFileVersionInfo)", sizeof(details->detection_method) - 1);
+                found = 1;
+            }
+        }
+
+        struct {
+            WORD wLanguage;
+            WORD wCodePage;
+        } *lpTranslate = NULL;
+        UINT cbTranslate = 0;
+        char subBlock[128];
+        char *strVal = NULL;
+        UINT strLen = 0;
+
+        char lang_prefixes[8][16];
+        int num_langs = 0;
+
+        if (VerQueryValueA(data, "\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate) && cbTranslate >= sizeof(*lpTranslate)) {
+            int max_pairs = (int)(cbTranslate / sizeof(*lpTranslate));
+            for (int p = 0; p < max_pairs && num_langs < 4; p++) {
+                snprintf(lang_prefixes[num_langs++], 16, "%04x%04x", lpTranslate[p].wLanguage, lpTranslate[p].wCodePage);
+            }
+        }
+        if (num_langs == 0) {
+            strncpy(lang_prefixes[num_langs++], "040904b0", 15);
+            strncpy(lang_prefixes[num_langs++], "000004b0", 15);
+            strncpy(lang_prefixes[num_langs++], "040904e4", 15);
+            strncpy(lang_prefixes[num_langs++], "04090000", 15);
+        }
+
+        for (int l = 0; l < num_langs; l++) {
+            snprintf(subBlock, sizeof(subBlock), "\\StringFileInfo\\%s\\FileVersion", lang_prefixes[l]);
+            if (VerQueryValueA(data, subBlock, (LPVOID*)&strVal, &strLen) && strVal && strLen > 0) {
+                while (*strVal == ' ') strVal++;
+                if (strlen(strVal) > 0) {
+                    strncpy(details->file_version, strVal, sizeof(details->file_version) - 1);
+                    strncpy(details->detection_method, "Windows Native API (FileVersion)", sizeof(details->detection_method) - 1);
+                    found = 1;
+                    break;
+                }
+            }
+        }
+
+        for (int l = 0; l < num_langs; l++) {
+            snprintf(subBlock, sizeof(subBlock), "\\StringFileInfo\\%s\\ProductVersion", lang_prefixes[l]);
+            if (VerQueryValueA(data, subBlock, (LPVOID*)&strVal, &strLen) && strVal && strLen > 0) {
+                while (*strVal == ' ') strVal++;
+                if (strlen(strVal) > 0) {
+                    strncpy(details->product_version, strVal, sizeof(details->product_version) - 1);
+                    break;
+                }
+            }
+        }
+
+        for (int l = 0; l < num_langs; l++) {
+            snprintf(subBlock, sizeof(subBlock), "\\StringFileInfo\\%s\\FileDescription", lang_prefixes[l]);
+            if (VerQueryValueA(data, subBlock, (LPVOID*)&strVal, &strLen) && strVal && strLen > 0) {
+                while (*strVal == ' ') strVal++;
+                if (strlen(strVal) > 0) {
+                    strncpy(details->file_description, strVal, sizeof(details->file_description) - 1);
+                    break;
+                }
+            }
+        }
+
+        for (int l = 0; l < num_langs; l++) {
+            snprintf(subBlock, sizeof(subBlock), "\\StringFileInfo\\%s\\CompanyName", lang_prefixes[l]);
+            if (VerQueryValueA(data, subBlock, (LPVOID*)&strVal, &strLen) && strVal && strLen > 0) {
+                while (*strVal == ' ') strVal++;
+                if (strlen(strVal) > 0) {
+                    strncpy(details->company_name, strVal, sizeof(details->company_name) - 1);
+                    break;
+                }
+            }
+        }
+
+        for (int l = 0; l < num_langs; l++) {
+            snprintf(subBlock, sizeof(subBlock), "\\StringFileInfo\\%s\\OriginalFilename", lang_prefixes[l]);
+            if (VerQueryValueA(data, subBlock, (LPVOID*)&strVal, &strLen) && strVal && strLen > 0) {
+                while (*strVal == ' ') strVal++;
+                if (strlen(strVal) > 0) {
+                    if (strstr(strVal, ".dll") || strstr(strVal, ".DLL") || strchr(details->product_version, '+')) {
+                        strncpy(details->runtime, ".NET Windows AppHost", sizeof(details->runtime) - 1);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    free(data);
+    return found;
+}
+#endif
+
 /* Deep PE Executable Inspector */
 int inspect_pe_executable(const char *filepath, pe_details_t *details) {
     if (!filepath || !details) return -1;
@@ -458,8 +664,15 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
         fclose(f);
     }
 
-    /* 2. Direct PE Resource Section Parsing */
-    if (rsrc_file_offset > 0 && rsrc_size > 0) {
+    /* 2. Windows Native Version API (Gold Standard on Windows) */
+#ifdef _WIN32
+    if (pe_inspect_windows_native(filepath, details)) {
+        log_msg("INFO", "Windows Native API extracted version for '%s': v%s", details->exe_name, details->file_version);
+    }
+#endif
+
+    /* 3. Cross-Platform PE Resource Directory Tree Parsing (Linux / Cross-Platform) */
+    if (strcmp(details->detection_method, "Default Fallback") == 0 && rsrc_file_offset > 0 && rsrc_size > 0) {
         FILE *rf = fopen(filepath, "rb");
         if (rf) {
             if (fseek(rf, rsrc_file_offset, SEEK_SET) == 0) {
@@ -468,48 +681,100 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
                 unsigned char *rdata = (unsigned char *)malloc(to_read);
                 if (rdata) {
                     size_t rd = fread(rdata, 1, to_read, rf);
-                    /* Search for VS_FIXEDFILEINFO (0xFEEF04BD) */
-                    for (size_t i = 0; i + 16 <= rd; i++) {
-                        if (rdata[i] == 0xBD && rdata[i+1] == 0x04 && rdata[i+2] == 0xEF && rdata[i+3] == 0xFE) {
-                            uint32_t ms = (uint32_t)rdata[i+8] | ((uint32_t)rdata[i+9] << 8) | ((uint32_t)rdata[i+10] << 16) | ((uint32_t)rdata[i+11] << 24);
-                            uint32_t ls = (uint32_t)rdata[i+12] | ((uint32_t)rdata[i+13] << 8) | ((uint32_t)rdata[i+14] << 16) | ((uint32_t)rdata[i+15] << 24);
-                            uint16_t v1 = (uint16_t)(ms >> 16);
-                            uint16_t v2 = (uint16_t)(ms & 0xFFFF);
-                            uint16_t v3 = (uint16_t)(ls >> 16);
-                            uint16_t v4 = (uint16_t)(ls & 0xFFFF);
-                            if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
-                                snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                                snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                                strncpy(details->detection_method, "PE Resource (.rsrc VS_FIXEDFILEINFO)", sizeof(details->detection_method) - 1);
-                                break;
+
+                    /* A. Locate RT_VERSION (type 16) specifically via Resource Directory Tree */
+                    uint32_t ver_rel_offset = 0;
+                    uint32_t ver_blob_size = 0;
+                    if (pe_find_version_resource_data(rdata, rd, rsrc_rva, &ver_rel_offset, &ver_blob_size) &&
+                        ver_rel_offset + 16 <= rd) {
+                        const unsigned char *vblob = rdata + ver_rel_offset;
+                        size_t vblob_len = (ver_rel_offset + ver_blob_size <= rd) ? ver_blob_size : (rd - ver_rel_offset);
+
+                        /* Search VS_FIXEDFILEINFO in the true application version blob */
+                        for (size_t i = 0; i + 16 <= vblob_len; i++) {
+                            if (vblob[i] == 0xBD && vblob[i+1] == 0x04 && vblob[i+2] == 0xEF && vblob[i+3] == 0xFE) {
+                                uint32_t ms = (uint32_t)vblob[i+8] | ((uint32_t)vblob[i+9] << 8) | ((uint32_t)vblob[i+10] << 16) | ((uint32_t)vblob[i+11] << 24);
+                                uint32_t ls = (uint32_t)vblob[i+12] | ((uint32_t)vblob[i+13] << 8) | ((uint32_t)vblob[i+14] << 16) | ((uint32_t)vblob[i+15] << 24);
+                                uint16_t v1 = (uint16_t)(ms >> 16);
+                                uint16_t v2 = (uint16_t)(ms & 0xFFFF);
+                                uint16_t v3 = (uint16_t)(ls >> 16);
+                                uint16_t v4 = (uint16_t)(ls & 0xFFFF);
+                                if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
+                                    snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                                    snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                                    strncpy(details->detection_method, "PE Resource Directory Tree (RT_VERSION)", sizeof(details->detection_method) - 1);
+                                    break;
+                                }
+                            }
+                        }
+
+                        /* Extract rich metadata from the true version blob */
+                        char str_val[256];
+                        if (pe_find_utf16_val(vblob, vblob_len, "FileVersion", str_val, sizeof(str_val))) {
+                            strncpy(details->file_version, str_val, sizeof(details->file_version) - 1);
+                            strncpy(details->detection_method, "PE Resource StringFileInfo (FileVersion)", sizeof(details->detection_method) - 1);
+                        }
+                        if (pe_find_utf16_val(vblob, vblob_len, "ProductVersion", str_val, sizeof(str_val))) {
+                            strncpy(details->product_version, str_val, sizeof(details->product_version) - 1);
+                        }
+                        if (pe_find_utf16_val(vblob, vblob_len, "FileDescription", str_val, sizeof(str_val))) {
+                            strncpy(details->file_description, str_val, sizeof(details->file_description) - 1);
+                        }
+                        if (pe_find_utf16_val(vblob, vblob_len, "CompanyName", str_val, sizeof(str_val))) {
+                            strncpy(details->company_name, str_val, sizeof(details->company_name) - 1);
+                        }
+                        if (pe_find_utf16_val(vblob, vblob_len, "OriginalFilename", str_val, sizeof(str_val))) {
+                            if (strstr(str_val, ".dll") || strstr(str_val, ".DLL") || strchr(details->product_version, '+')) {
+                                strncpy(details->runtime, ".NET Windows AppHost", sizeof(details->runtime) - 1);
                             }
                         }
                     }
 
-                    /* Search for UTF-16 metadata strings in resource table */
-                    char str_val[256];
-                    if (pe_find_utf16_val(rdata, rd, "ProductVersion", str_val, sizeof(str_val))) {
-                        strncpy(details->product_version, str_val, sizeof(details->product_version) - 1);
-                        if (strcmp(details->detection_method, "Default Fallback") == 0) {
-                            strncpy(details->file_version, str_val, sizeof(details->file_version) - 1);
-                            strncpy(details->detection_method, "PE StringFileInfo (ProductVersion)", sizeof(details->detection_method) - 1);
-                        }
-                    }
-                    if (pe_find_utf16_val(rdata, rd, "FileVersion", str_val, sizeof(str_val))) {
-                        if (strcmp(details->detection_method, "Default Fallback") == 0) {
-                            strncpy(details->file_version, str_val, sizeof(details->file_version) - 1);
-                            strncpy(details->detection_method, "PE StringFileInfo (FileVersion)", sizeof(details->detection_method) - 1);
-                        }
-                    }
-                    if (pe_find_utf16_val(rdata, rd, "FileDescription", str_val, sizeof(str_val))) {
-                        strncpy(details->file_description, str_val, sizeof(details->file_description) - 1);
-                    }
-                    if (pe_find_utf16_val(rdata, rd, "CompanyName", str_val, sizeof(str_val))) {
-                        strncpy(details->company_name, str_val, sizeof(details->company_name) - 1);
-                    }
-                    if (pe_find_utf16_val(rdata, rd, "OriginalFilename", str_val, sizeof(str_val))) {
-                        if (strstr(str_val, ".dll") || strstr(str_val, ".DLL") || strchr(details->product_version, '+')) {
-                            strncpy(details->runtime, ".NET Windows AppHost", sizeof(details->runtime) - 1);
+                    /* B. Fallback Linear Scan in .rsrc, skipping Microsoft runtime helper DLLs (mscordaccore.dll etc.) */
+                    if (strcmp(details->detection_method, "Default Fallback") == 0) {
+                        for (size_t i = 0; i + 16 <= rd; i++) {
+                            if (rdata[i] == 0xBD && rdata[i+1] == 0x04 && rdata[i+2] == 0xEF && rdata[i+3] == 0xFE) {
+                                size_t check_len = (i + 1500 <= rd) ? 1500 : (rd - i);
+                                char check_str[256] = {0};
+                                if (pe_find_utf16_val(rdata + i, check_len, "OriginalFilename", check_str, sizeof(check_str))) {
+                                    if (strcasecmp(check_str, "mscordaccore.dll") == 0 || strcasecmp(check_str, "createdump.exe") == 0) {
+                                        continue; /* Skip Microsoft runtime helper */
+                                    }
+                                }
+                                if (pe_find_utf16_val(rdata + i, check_len, "CompanyName", check_str, sizeof(check_str))) {
+                                    if (strcasecmp(check_str, "Microsoft Corporation") == 0 &&
+                                        !str_case_contains(details->exe_name, "microsoft")) {
+                                        continue; /* Skip generic Microsoft component */
+                                    }
+                                }
+
+                                uint32_t ms = (uint32_t)rdata[i+8] | ((uint32_t)rdata[i+9] << 8) | ((uint32_t)rdata[i+10] << 16) | ((uint32_t)rdata[i+11] << 24);
+                                uint32_t ls = (uint32_t)rdata[i+12] | ((uint32_t)rdata[i+13] << 8) | ((uint32_t)rdata[i+14] << 16) | ((uint32_t)rdata[i+15] << 24);
+                                uint16_t v1 = (uint16_t)(ms >> 16);
+                                uint16_t v2 = (uint16_t)(ms & 0xFFFF);
+                                uint16_t v3 = (uint16_t)(ls >> 16);
+                                uint16_t v4 = (uint16_t)(ls & 0xFFFF);
+                                if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
+                                    snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                                    snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
+                                    strncpy(details->detection_method, "PE Resource (.rsrc VS_FIXEDFILEINFO)", sizeof(details->detection_method) - 1);
+
+                                    char str_val[256];
+                                    if (pe_find_utf16_val(rdata + i, check_len, "FileVersion", str_val, sizeof(str_val))) {
+                                        strncpy(details->file_version, str_val, sizeof(details->file_version) - 1);
+                                    }
+                                    if (pe_find_utf16_val(rdata + i, check_len, "ProductVersion", str_val, sizeof(str_val))) {
+                                        strncpy(details->product_version, str_val, sizeof(details->product_version) - 1);
+                                    }
+                                    if (pe_find_utf16_val(rdata + i, check_len, "FileDescription", str_val, sizeof(str_val))) {
+                                        strncpy(details->file_description, str_val, sizeof(details->file_description) - 1);
+                                    }
+                                    if (pe_find_utf16_val(rdata + i, check_len, "CompanyName", str_val, sizeof(str_val))) {
+                                        strncpy(details->company_name, str_val, sizeof(details->company_name) - 1);
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
 
@@ -519,35 +784,6 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
             fclose(rf);
         }
     }
-
-    /* 3. Windows Native Version API Verification */
-#ifdef _WIN32
-    if (strcmp(details->detection_method, "Default Fallback") == 0) {
-        DWORD dummy = 0;
-        DWORD size = GetFileVersionInfoSizeA(filepath, &dummy);
-        if (size > 0) {
-            void *data = malloc(size);
-            if (data) {
-                if (GetFileVersionInfoA(filepath, 0, size, data)) {
-                    VS_FIXEDFILEINFO *ffi = NULL;
-                    UINT len = 0;
-                    if (VerQueryValueA(data, "\\", (LPVOID*)&ffi, &len) && ffi && len >= sizeof(VS_FIXEDFILEINFO)) {
-                        WORD v1 = HIWORD(ffi->dwFileVersionMS);
-                        WORD v2 = LOWORD(ffi->dwFileVersionMS);
-                        WORD v3 = HIWORD(ffi->dwFileVersionLS);
-                        WORD v4 = LOWORD(ffi->dwFileVersionLS);
-                        if (v1 != 0 || v2 != 0 || v3 != 0 || v4 != 0) {
-                            snprintf(details->file_version, sizeof(details->file_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                            snprintf(details->product_version, sizeof(details->product_version), "%u.%u.%u.%u", v1, v2, v3, v4);
-                            strncpy(details->detection_method, "Windows Version Resource (VS_FIXEDFILEINFO)", sizeof(details->detection_method) - 1);
-                        }
-                    }
-                }
-                free(data);
-            }
-        }
-    }
-#endif
 
     /* 4. Cross-Platform Chunked Full File Scan Fallback for non-standard binaries */
     if (strcmp(details->detection_method, "Default Fallback") == 0) {
@@ -564,6 +800,20 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
 
                     for (size_t i = 0; i + 16 <= total_buf; i++) {
                         if (chunk[i] == 0xBD && chunk[i+1] == 0x04 && chunk[i+2] == 0xEF && chunk[i+3] == 0xFE) {
+                            size_t check_len = (i + 1500 <= total_buf) ? 1500 : (total_buf - i);
+                            char check_str[256] = {0};
+                            if (pe_find_utf16_val(chunk + i, check_len, "OriginalFilename", check_str, sizeof(check_str))) {
+                                if (strcasecmp(check_str, "mscordaccore.dll") == 0 || strcasecmp(check_str, "createdump.exe") == 0) {
+                                    continue;
+                                }
+                            }
+                            if (pe_find_utf16_val(chunk + i, check_len, "CompanyName", check_str, sizeof(check_str))) {
+                                if (strcasecmp(check_str, "Microsoft Corporation") == 0 &&
+                                    !str_case_contains(details->exe_name, "microsoft")) {
+                                    continue;
+                                }
+                            }
+
                             uint32_t ms = (uint32_t)chunk[i+8] | ((uint32_t)chunk[i+9] << 8) | ((uint32_t)chunk[i+10] << 16) | ((uint32_t)chunk[i+11] << 24);
                             uint32_t ls = (uint32_t)chunk[i+12] | ((uint32_t)chunk[i+13] << 8) | ((uint32_t)chunk[i+14] << 16) | ((uint32_t)chunk[i+15] << 24);
                             uint16_t v1 = (uint16_t)(ms >> 16);
@@ -592,6 +842,10 @@ int inspect_pe_executable(const char *filepath, pe_details_t *details) {
             fclose(f2);
         }
     }
+
+    /* Sanitize and normalize version strings (strip commit hash suffix, extra spaces, commas to dots) */
+    sanitize_version_string(details->file_version, sizeof(details->file_version));
+    sanitize_version_string(details->product_version, sizeof(details->product_version));
 
     snprintf(details->summary, sizeof(details->summary),
              "%s [%s, %s, %s] -> v%s",
