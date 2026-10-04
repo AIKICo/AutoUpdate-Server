@@ -17,15 +17,27 @@
 #include <time.h>
 #include <ctype.h>
 
+/* Browsers share cookies between ports of the same host, so two server instances (or two ports)
+ * on one host used to overwrite each other's "auth_token" and publishing failed with
+ * "Authentication required". The session cookie is therefore named per port. */
+static void auth_cookie_name(const server_ctx_t *ctx, char *out, size_t len) {
+    snprintf(out, len, "auth_token_%d", ctx ? ctx->port : 0);
+}
+
 int admin_get_current_user(const http_request_t *req, const server_ctx_t *ctx, char *out_user, size_t ulen, char *out_role, size_t rlen) {
     if (out_user && ulen > 0) out_user[0] = '\0';
     if (out_role && rlen > 0) out_role[0] = '\0';
 
-    /* 1. Cookie token */
-    char cookie_token[128] = {0};
-    if (http_get_cookie(req, "auth_token", cookie_token, sizeof(cookie_token)) == 0 && strlen(cookie_token) > 0) {
-        if (db_session_validate(cookie_token, out_user, ulen, out_role, rlen) != 0) {
-            return 1;
+    /* 1. Cookie token (port-specific first, then legacy name) */
+    char cookie_name[64];
+    auth_cookie_name(ctx, cookie_name, sizeof(cookie_name));
+    const char *cookie_names[2] = { cookie_name, "auth_token" };
+    for (int ci = 0; ci < 2; ci++) {
+        char cookie_token[128] = {0};
+        if (http_get_cookie(req, cookie_names[ci], cookie_token, sizeof(cookie_token)) == 0 && strlen(cookie_token) > 0) {
+            if (db_session_validate(cookie_token, out_user, ulen, out_role, rlen) != 0) {
+                return 1;
+            }
         }
     }
 
@@ -76,9 +88,16 @@ int admin_is_authorized(const http_request_t *req, const server_ctx_t *ctx) {
     return 0;
 }
 
-static void send_auth_required(socket_t sock) {
-    http_send_json(sock, 401, "{\"error\": 401, \"message\": \"Authentication required\"}\n");
+static void send_auth_required_ex(socket_t sock, const http_request_t *req) {
+    if (req) {
+        log_msg("WARN", "401 Authentication required: %s %s (session cookie: %s, bearer/basic header: %s)",
+                req->method_str, req->path,
+                req->cookie_header[0] ? "present but not valid" : "missing",
+                req->auth_header[0] ? "present" : "none");
+    }
+    http_send_json(sock, 401, "{\"error\": 401, \"message\": \"Authentication required - your session is missing or expired. Please sign in again.\"}\n");
 }
+#define send_auth_required(s) send_auth_required_ex((s), req)
 
 static int sanitize_name(const char *name) {
     if (!name || strlen(name) == 0 || strlen(name) > 128) return 0;
@@ -173,6 +192,19 @@ static void get_query_param(const char *query, const char *key, char *out, size_
     url_decode(enc, out, out_len);
 }
 
+static void copy_cstr(char *dst, size_t cap, const char *src) {
+    if (!dst || cap == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    strncpy(dst, src, cap - 1);
+    dst[cap - 1] = '\0';
+}
+
+/* Boolean form/JSON field: 1 / true / on / yes */
+static int body_flag(const char *body, const char *key) {
+    char v[16];
+    get_body_param(body, key, v, sizeof(v));
+    return strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 || strcasecmp(v, "yes") == 0;
+}
 static void json_escape(const char *src, char *dst, size_t dst_len) {
     if (!src || !dst || dst_len == 0) return;
     size_t j = 0;
@@ -1396,7 +1428,7 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         return http_send_response(sock, 200, "OK", "text/html; charset=utf-8", NULL, embedded, strlen(embedded));
     }
 
-    /* 1a. API: Login (SQLite-backed with salted SHA-256) */
+    /* 1a. API: Login (SQL Server-backed with salted SHA-256) */
     if (strcmp(req->path, "/api/login") == 0 && req->method == HTTP_METHOD_POST) {
         char username[128] = {0};
         char password[128] = {0};
@@ -1418,7 +1450,7 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         if (db_user_auth(username, password, role, sizeof(role)) != 0) {
             auth_ok = 1;
         } else if (strlen(ctx->admin_pass) > 0 && strcmp(username, ctx->admin_user) == 0 && strcmp(password, ctx->admin_pass) == 0) {
-            /* Auto-seed default admin into SQLite if needed */
+            /* Auto-seed default admin into the database if needed */
             strncpy(role, "admin", sizeof(role) - 1);
             db_user_create(username, password, "admin");
             auth_ok = 1;
@@ -1431,14 +1463,23 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
 
         char token[128] = {0};
         if (db_session_create(username, role, token, sizeof(token)) != 0) {
+            log_msg("ERROR", "Failed to create session token for user '%s'", username);
             return http_send_error(sock, 500, "Failed to create session token");
         }
 
-        char cookie_hdr[256];
-        snprintf(cookie_hdr, sizeof(cookie_hdr), "Set-Cookie: auth_token=%s; Path=/; Max-Age=604800; HttpOnly; SameSite=Lax\r\n", token);
+        char cookie_name[64];
+        auth_cookie_name(ctx, cookie_name, sizeof(cookie_name));
+        char cookie_hdr[512];
+        snprintf(cookie_hdr, sizeof(cookie_hdr),
+                 "Set-Cookie: %s=%s; Path=/; Max-Age=604800; HttpOnly; SameSite=Lax\r\n"
+                 "Set-Cookie: auth_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax\r\n",
+                 cookie_name, token);
 
-        char resp[512];
-        snprintf(resp, sizeof(resp), "{\"success\": true, \"token\": \"%s\", \"username\": \"%s\", \"role\": \"%s\"}\n", token, username, role);
+        char esc_user[300], esc_role[100];
+        json_escape(username, esc_user, sizeof(esc_user));
+        json_escape(role, esc_role, sizeof(esc_role));
+        char resp[768];
+        snprintf(resp, sizeof(resp), "{\"success\": true, \"token\": \"%s\", \"username\": \"%s\", \"role\": \"%s\"}\n", token, esc_user, esc_role);
 
         log_msg("INFO", "User logged in: %s (role: %s)", username, role);
         return http_send_response(sock, 200, "OK", "application/json; charset=utf-8", cookie_hdr, resp, strlen(resp));
@@ -1446,27 +1487,48 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
 
     /* 1b. API: Logout */
     if (strcmp(req->path, "/api/logout") == 0 && req->method == HTTP_METHOD_POST) {
-        char cookie_token[128] = {0};
-        if (http_get_cookie(req, "auth_token", cookie_token, sizeof(cookie_token)) == 0) {
-            db_session_delete(cookie_token);
+        char cookie_name[64];
+        auth_cookie_name(ctx, cookie_name, sizeof(cookie_name));
+        const char *cookie_names[2] = { cookie_name, "auth_token" };
+        for (int ci = 0; ci < 2; ci++) {
+            char cookie_token[128] = {0};
+            if (http_get_cookie(req, cookie_names[ci], cookie_token, sizeof(cookie_token)) == 0 && cookie_token[0]) {
+                db_session_delete(cookie_token);
+            }
         }
-        const char *clear_cookie = "Set-Cookie: auth_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax\r\n";
-        return http_send_response(sock, 200, "OK", "application/json; charset=utf-8", clear_cookie, "{\"success\": true, \"message\": \"Logged out successfully.\"}\n", 48);
+        if (strncasecmp(req->auth_header, "Bearer ", 7) == 0) {
+            const char *t = req->auth_header + 7;
+            while (*t == ' ') t++;
+            db_session_delete(t);
+        }
+        char clear_cookie[256];
+        snprintf(clear_cookie, sizeof(clear_cookie),
+                 "Set-Cookie: %s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax\r\n"
+                 "Set-Cookie: auth_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax\r\n", cookie_name);
+        const char *out = "{\"success\": true, \"message\": \"Logged out successfully.\"}\n";
+        return http_send_response(sock, 200, "OK", "application/json; charset=utf-8", clear_cookie, out, strlen(out));
     }
 
     /* 1c. API: Current Session Status (Who am I) */
     if (strcmp(req->path, "/api/me") == 0 && req->method == HTTP_METHOD_GET) {
         char username[64] = {0};
         char role[32] = {0};
+        int is_configured = db_is_configured();
+        int is_connected = db_is_connected();
         if (admin_get_current_user(req, ctx, username, sizeof(username), role, sizeof(role))) {
-            char resp[256];
-            snprintf(resp, sizeof(resp), "{\"logged_in\": true, \"username\": \"%s\", \"role\": \"%s\"}\n", username, role);
+            char resp[384];
+            snprintf(resp, sizeof(resp),
+                "{\"logged_in\": true, \"username\": \"%s\", \"role\": \"%s\", \"db_configured\": %s, \"db_connected\": %s}\n",
+                username, role, is_configured ? "true" : "false", is_connected ? "true" : "false");
             return http_send_json(sock, 200, resp);
         }
-        return http_send_json(sock, 200, "{\"logged_in\": false}\n");
+        char resp[256];
+        snprintf(resp, sizeof(resp), "{\"logged_in\": false, \"db_configured\": %s, \"db_connected\": %s}\n",
+            is_configured ? "true" : "false", is_connected ? "true" : "false");
+        return http_send_json(sock, 200, resp);
     }
 
-    /* 1d. API: List Users (SQLite) */
+    /* 1d. API: List Users (SQL Server) */
     if (strcmp(req->path, "/api/users") == 0 && req->method == HTTP_METHOD_GET) {
         if (!admin_is_authorized(req, ctx)) {
             send_auth_required(sock);
@@ -1604,7 +1666,7 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             return http_send_json(sock, 200, resp);
         }
 
-        /* Save to SQLite */
+        /* Save to the database */
         db_config_set_int("port", new_port);
 
         /* Send response BEFORE port switch so the browser receives HTTP 200 */
@@ -1644,7 +1706,7 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
             return http_send_json(sock, 400, "{\"success\": false, \"message\": \"Storage path cannot be empty.\"}\n");
         }
 
-        /* Save to SQLite */
+        /* Save to the database */
         db_config_set("updates_dir", new_path);
 
         /* Apply to server */
@@ -1659,6 +1721,160 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         return http_send_json(sock, 200, resp);
     }
 
+    /* 1k. API: Database (SQL Server) settings - read */
+    if (strcmp(req->path, "/api/db/settings") == 0 && req->method == HTTP_METHOD_GET) {
+        /* Allow unauthenticated view if the database has never been configured and is not connected */
+        int needs_auth = db_is_configured() || db_is_connected();
+        if (needs_auth && !admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+        db_settings_t s;
+        db_get_settings(&s);
+        char last_err[1024];
+        db_get_last_error(last_err, sizeof(last_err));
+
+        char e_drv[300], e_srv[600], e_db[300], e_usr[300], e_err[2200];
+        json_escape(s.driver, e_drv, sizeof(e_drv));
+        json_escape(s.server, e_srv, sizeof(e_srv));
+        json_escape(s.database, e_db, sizeof(e_db));
+        json_escape(s.user, e_usr, sizeof(e_usr));
+        json_escape(db_is_connected() ? "" : last_err, e_err, sizeof(e_err));
+
+        char resp[5120];
+        snprintf(resp, sizeof(resp),
+            "{\"connected\": %s, \"driver\": \"%s\", \"server\": \"%s\", \"port\": %d, \"database\": \"%s\", "
+            "\"user\": \"%s\", \"has_password\": %s, \"trusted\": %s, \"encrypt\": %s, \"trust_cert\": %s, "
+            "\"auto_create\": %s, \"last_error\": \"%s\", \"engine\": \"Microsoft SQL Server\", \"platform\": \"%s\"}\n",
+            db_is_connected() ? "true" : "false", e_drv, e_srv, s.port, e_db, e_usr,
+            s.password[0] ? "true" : "false", s.trusted ? "true" : "false", s.encrypt ? "true" : "false",
+            s.trust_cert ? "true" : "false", s.auto_create ? "true" : "false", e_err,
+#ifdef _WIN32
+            "windows"
+#else
+            "linux"
+#endif
+        );
+        return http_send_json(sock, 200, resp);
+    }
+
+    /* 1l. API: Database settings - test / save+apply */
+    if ((strcmp(req->path, "/api/db/test") == 0 || strcmp(req->path, "/api/db/settings") == 0) && req->method == HTTP_METHOD_POST) {
+        /* Allow unauthenticated configuration on first setup if the database has never been configured and is offline */
+        int needs_auth = db_is_configured() || db_is_connected();
+        if (needs_auth && !admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+        int is_test = (strcmp(req->path, "/api/db/test") == 0);
+
+        db_settings_t s;
+        db_get_settings(&s);   /* start from current values so a blank password keeps the stored one */
+        char v[512];
+        get_body_param(req->body, "driver", v, sizeof(v));   copy_cstr(s.driver, sizeof(s.driver), v[0] ? v : "auto");
+        get_body_param(req->body, "server", v, sizeof(v));   copy_cstr(s.server, sizeof(s.server), v);
+        get_body_param(req->body, "port", v, sizeof(v));     s.port = atoi(v);
+        get_body_param(req->body, "database", v, sizeof(v)); copy_cstr(s.database, sizeof(s.database), v);
+        get_body_param(req->body, "user", v, sizeof(v));     copy_cstr(s.user, sizeof(s.user), v);
+        get_body_param(req->body, "password", v, sizeof(v));
+        if (v[0]) copy_cstr(s.password, sizeof(s.password), v);
+        s.trusted     = body_flag(req->body, "trusted");
+        s.encrypt     = body_flag(req->body, "encrypt");
+        s.trust_cert  = body_flag(req->body, "trust_cert");
+        s.auto_create = body_flag(req->body, "auto_create");
+        if (body_flag(req->body, "clear_password")) s.password[0] = '\0';
+
+        char msg[1024] = {0}, e_msg[2200];
+        int rc;
+        if (is_test) rc = db_test_connection(&s, msg, sizeof(msg));
+        else         rc = db_apply_settings(NULL, &s, msg, sizeof(msg));
+        if (rc == 0 && !is_test) copy_cstr(msg, sizeof(msg), "Connected. Settings saved and applied.");
+        json_escape(msg, e_msg, sizeof(e_msg));
+
+        char resp[2600];
+        snprintf(resp, sizeof(resp), "{\"success\": %s, \"message\": \"%s\"}\n", rc == 0 ? "true" : "false", e_msg);
+        return http_send_json(sock, rc == 0 ? 200 : 400, resp);
+    }
+
+    /* 1m. API: System logs (memory ring buffer or persisted database rows) */
+    if (strcmp(req->path, "/api/logs") == 0 && req->method == HTTP_METHOD_GET) {
+        if (!admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+        char level[16] = {0}, search[128] = {0}, lim[16] = {0}, since[24] = {0}, source[16] = {0};
+        get_query_param(req->query, "level", level, sizeof(level));
+        get_query_param(req->query, "q", search, sizeof(search));
+        get_query_param(req->query, "limit", lim, sizeof(lim));
+        get_query_param(req->query, "since", since, sizeof(since));
+        get_query_param(req->query, "source", source, sizeof(source));
+
+        int limit = atoi(lim);
+        if (limit <= 0) limit = 300;
+        if (limit > 1000) limit = 1000;
+        int rank = level[0] ? log_level_rank(level) : 0;
+        int use_db = (strcmp(source, "db") == 0);
+
+        size_t out_cap = (size_t)limit * 2400 + 512;
+        char *out = (char *)malloc(out_cap);
+        if (!out) return http_send_error(sock, 500, "Out of memory");
+        size_t off = 0;
+        int count = 0;
+        unsigned long long last_id = (unsigned long long)strtoull(since, NULL, 10);
+
+        if (use_db) {
+            db_log_row_t *rows = (db_log_row_t *)malloc(sizeof(db_log_row_t) * (size_t)limit);
+            if (!rows) { free(out); return http_send_error(sock, 500, "Out of memory"); }
+            int n = db_logs_query(rows, limit, level[0] ? level : "DEBUG", search);
+            if (n < 0) {
+                free(rows);
+                free(out);
+                return http_send_json(sock, 200, "{\"source\": \"db\", \"db_offline\": true, \"count\": 0, \"last_id\": 0, \"entries\": []}\n");
+            }
+            off += (size_t)snprintf(out + off, out_cap - off, "{\"source\": \"db\", \"db_offline\": false, \"entries\": [");
+            for (int i = n - 1; i >= 0; i--) {   /* DB returns newest first; send oldest first */
+                char em[2200];
+                json_escape(rows[i].msg, em, sizeof(em));
+                off += (size_t)snprintf(out + off, out_cap - off, "%s{\"id\": %lld, \"ts\": %lld, \"level\": \"%s\", \"msg\": \"%s\"}",
+                                        count ? "," : "", (long long)rows[i].id, (long long)rows[i].ts, rows[i].level, em);
+                count++;
+            }
+            free(rows);
+        } else {
+            log_entry_t *ents = (log_entry_t *)malloc(sizeof(log_entry_t) * (size_t)limit);
+            if (!ents) { free(out); return http_send_error(sock, 500, "Out of memory"); }
+            int n = log_get_entries(ents, limit, last_id, rank, search);
+            off += (size_t)snprintf(out + off, out_cap - off, "{\"source\": \"memory\", \"db_offline\": false, \"entries\": [");
+            for (int i = 0; i < n; i++) {
+                char em[1100];
+                json_escape(ents[i].msg, em, sizeof(em));
+                off += (size_t)snprintf(out + off, out_cap - off, "%s{\"id\": %llu, \"ts\": %lld, \"level\": \"%s\", \"msg\": \"%s\"}",
+                                        count ? "," : "", (unsigned long long)ents[i].id, (long long)ents[i].ts, ents[i].level, em);
+                if (ents[i].id > last_id) last_id = ents[i].id;
+                count++;
+            }
+            free(ents);
+        }
+        off += (size_t)snprintf(out + off, out_cap - off, "], \"count\": %d, \"last_id\": %llu}\n", count, last_id);
+        int ret = http_send_json(sock, 200, out);
+        free(out);
+        return ret;
+    }
+
+    if (strcmp(req->path, "/api/logs/clear") == 0 && req->method == HTTP_METHOD_POST) {
+        if (!admin_is_authorized(req, ctx)) {
+            send_auth_required(sock);
+            return 0;
+        }
+        char source[16] = {0};
+        get_query_param(req->query, "source", source, sizeof(source));
+        if (source[0] == '\0') get_body_param(req->body, "source", source, sizeof(source));
+        if (strcmp(source, "db") == 0 || strcmp(source, "all") == 0) db_logs_clear();
+        if (strcmp(source, "db") != 0) log_clear_entries();
+        log_msg("INFO", "Logs cleared by operator (%s)", source[0] ? source : "memory");
+        return http_send_json(sock, 200, "{\"success\": true}\n");
+    }
+
     /* 2. API: Server Statistics */
     if (strcmp(req->path, "/api/stats") == 0) {
         if (!admin_is_authorized(req, ctx)) {
@@ -1670,16 +1886,18 @@ int admin_handle_request(socket_t sock, const http_request_t *req, server_ctx_t 
         char bytes_str[32];
         format_bytes(ctx->total_bytes_sent, bytes_str, sizeof(bytes_str));
 
-        char json[512];
+        char json[640];
         snprintf(json, sizeof(json),
             "{\"uptime_sec\": %llu, \"total_requests\": %llu, \"total_bytes\": %llu, "
-            "\"total_bytes_str\": \"%s\", \"active_connections\": %d, \"port\": %d, \"version\": \"2.0.0\"}\n",
+            "\"total_bytes_str\": \"%s\", \"active_connections\": %d, \"port\": %d, \"version\": \"2.0.0\", "
+            "\"db_connected\": %s}\n",
             (unsigned long long)uptime,
             (unsigned long long)ctx->total_requests,
             (unsigned long long)ctx->total_bytes_sent,
             bytes_str,
             ctx->active_connections,
-            ctx->port
+            ctx->port,
+            db_is_connected() ? "true" : "false"
         );
         return http_send_json(sock, 200, json);
     }

@@ -21,9 +21,9 @@ typedef struct {
     char path[1024];
     char query[1024];
     char range_header[128];
-    char auth_header[256];
+    char auth_header[1024];
     char host_header[256];
-    char cookie_header[512];
+    char cookie_header[4096];
     char content_type[128];
     size_t content_length;
     const char *body;

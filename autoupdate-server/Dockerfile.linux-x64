@@ -2,7 +2,7 @@
 FROM debian:bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc make libc6-dev libsqlite3-dev ca-certificates \
+    gcc make libc6-dev unixodbc-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -13,8 +13,14 @@ RUN make publish-linux-x64
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsqlite3-0 ca-certificates tar unzip curl \
+    unixodbc ca-certificates tar unzip curl gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Microsoft ODBC Driver 18 for SQL Server (required at runtime to reach MSSQL)
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg && \
+    curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list -o /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/autoupdate-server
 COPY --from=builder /app/publish/linux-x64/ /opt/autoupdate-server/

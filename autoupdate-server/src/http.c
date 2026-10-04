@@ -60,7 +60,7 @@ int http_parse_request(const char *raw_req, size_t raw_len, http_request_t *req)
         if (!next_line || next_line == p) break;
 
         size_t hlen = next_line - p;
-        char hbuf[1024];
+        char hbuf[8192];
         if (hlen >= sizeof(hbuf)) hlen = sizeof(hbuf) - 1;
         memcpy(hbuf, p, hlen);
         hbuf[hlen] = '\0';
@@ -135,6 +135,8 @@ int http_send_json(socket_t sock, int code, const char *json_body) {
 
 int http_send_error(socket_t sock, int code, const char *message) {
     char json_err[512];
+    if (code >= 500) log_msg("ERROR", "HTTP %d: %s", code, message);
+    else if (code != 404) log_msg("WARN", "HTTP %d: %s", code, message);
     snprintf(json_err, sizeof(json_err), "{\"error\": %d, \"message\": \"%s\"}\n", code, message);
     return http_send_response(sock, code, message, "application/json", NULL, json_err, strlen(json_err));
 }

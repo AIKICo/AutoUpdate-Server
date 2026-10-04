@@ -40,7 +40,7 @@ static void print_usage(const char *prog) {
     printf("  %s stop      توقف سرور فعال در پس‌زمینه (Stop running daemon)\n", prog);
     printf("  %s status    بررسی وضعیت سرور (Check server status)\n\n", prog);
     printf("سوئیچ‌ها (Options):\n");
-    printf("  -p <port>       تعیین پورت شنود (Listen port, پیش‌فرض: 8080)\n");
+    printf("  -p <port>       تعیین پورت شنود (Listen port, پیش‌فرض: 8000)\n");
     printf("  -w <path>       مسیر پوشه فایل‌های به‌روزرسانی (Updates directory, پیش‌فرض: ./updates)\n");
     printf("  -r <path>       مسیر فایل‌های وب مدیریتی (Webroot directory, پیش‌فرض: ./webroot)\n");
     printf("  -u <username>   نام کاربری پنل مدیریت (Admin username, پیش‌فرض: admin)\n");
@@ -49,7 +49,7 @@ static void print_usage(const char *prog) {
     printf("  -l <logfile>    تعیین مسیر فایل لاگ (Log file path, پیش‌فرض: autoupdate.log)\n");
     printf("  -h, --help      نمایش این راهنما\n\n");
     printf("مثال‌ها (Examples):\n");
-    printf("  %s -p 8080 -d                  اجرا در پس‌زمینه روی پورت 8080\n", prog);
+    printf("  %s -p 8000 -d                  اجرا در پس‌زمینه روی پورت 8000\n", prog);
     printf("  %s -p 9000 -w /var/updates -d  اجرا در پس‌زمینه با مسیر سفارشی\n", prog);
     printf("  %s stop                        توقف سرور در حال اجرا\n", prog);
     printf("  %s status                      بررسی وضعیت اجرا\n\n", prog);
@@ -265,9 +265,12 @@ int main(int argc, char *argv[]) {
     }
 
     log_init(log_file);
-    db_init("autoupdate.db");
+    log_msg("INFO", "AutoUpdate-Server starting (database: Microsoft SQL Server, settings file: %s)", DB_SETTINGS_FILE);
+    if (db_init(DB_SETTINGS_FILE) != 0) {
+        log_msg("WARN", "Starting WITHOUT database. Sign in with the CLI admin credentials and open Administration > Database to configure it.");
+    }
 
-    /* Load saved port and updates_dir from SQLite if not overridden by CLI */
+    /* Load saved port and updates_dir from the database if not overridden by CLI */
     if (port == DEFAULT_PORT) {
         port = db_config_get_int("port", DEFAULT_PORT);
     }

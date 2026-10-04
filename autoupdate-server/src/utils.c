@@ -28,8 +28,80 @@ void log_close(void) {
     }
 }
 
-void log_msg(const char *level, const char *fmt, ...) {
+#define LOG_RING_CAP 2000
+static log_entry_t g_ring[LOG_RING_CAP];
+static uint64_t g_ring_last_id = 0;   /* id of newest entry (0 = empty) */
+
+int log_level_rank(const char *level) {
+    if (!level) return 1;
+    if (strcasecmp(level, "ERROR") == 0 || strcasecmp(level, "FATAL") == 0) return 3;
+    if (strcasecmp(level, "WARN") == 0 || strcasecmp(level, "WARNING") == 0) return 2;
+    if (strcasecmp(level, "DEBUG") == 0) return 0;
+    return 1;
+}
+
+static int ci_contains(const char *hay, const char *needle) {
+    if (!needle || !*needle) return 1;
+    size_t nl = strlen(needle);
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < nl && hay[i] && tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == nl) return 1;
+    }
+    return 0;
+}
+
+static log_entry_t *ring_slot(uint64_t id) { return &g_ring[id % LOG_RING_CAP]; }
+
+int log_get_entries(log_entry_t *out, int max, uint64_t since_id, int min_rank, const char *search) {
+    if (!out || max <= 0) return 0;
+    int n = 0;
     pthread_mutex_lock(&g_log_mutex);
+    uint64_t first = (g_ring_last_id > LOG_RING_CAP) ? g_ring_last_id - LOG_RING_CAP + 1 : 1;
+    if (since_id + 1 > first) first = since_id + 1;
+    /* walk newest -> oldest, collect, then reverse */
+    for (uint64_t id = g_ring_last_id; id >= first && id > 0 && n < max; id--) {
+        const log_entry_t *e = ring_slot(id);
+        if (e->id != id) continue;   /* slot cleared / overwritten */
+        if (log_level_rank(e->level) < min_rank) continue;
+        if (!ci_contains(e->msg, search)) continue;
+        out[n++] = *e;
+    }
+    pthread_mutex_unlock(&g_log_mutex);
+    for (int i = 0, j = n - 1; i < j; i++, j--) {
+        log_entry_t t = out[i]; out[i] = out[j]; out[j] = t;
+    }
+    return n;
+}
+
+void log_clear_entries(void) {
+    pthread_mutex_lock(&g_log_mutex);
+    /* ids stay monotonic so polling clients using since_id keep working */
+    memset(g_ring, 0, sizeof(g_ring));
+    pthread_mutex_unlock(&g_log_mutex);
+}
+
+int log_take_unpersisted(log_entry_t *out, int max) {
+    if (!out || max <= 0) return 0;
+    int n = 0;
+    pthread_mutex_lock(&g_log_mutex);
+    uint64_t first = (g_ring_last_id > LOG_RING_CAP) ? g_ring_last_id - LOG_RING_CAP + 1 : 1;
+    for (uint64_t id = first; id <= g_ring_last_id && id > 0 && n < max; id++) {
+        log_entry_t *e = ring_slot(id);
+        if (e->id != id || e->persisted) continue;
+        out[n++] = *e;
+        e->persisted = 1;
+    }
+    pthread_mutex_unlock(&g_log_mutex);
+    return n;
+}
+
+void log_msg(const char *level, const char *fmt, ...) {
+    char msg[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
 
     time_t now = time(NULL);
     struct tm tm_buf;
@@ -44,24 +116,25 @@ void log_msg(const char *level, const char *fmt, ...) {
     char time_str[32];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
 
-    va_list args1, args2;
-    va_start(args1, fmt);
-    va_copy(args2, args1);
+    pthread_mutex_lock(&g_log_mutex);
 
-    fprintf(stdout, "[%s] [%s] ", time_str, level);
-    vfprintf(stdout, fmt, args1);
-    fprintf(stdout, "\n");
+    fprintf(stdout, "[%s] [%s] %s\n", time_str, level, msg);
     fflush(stdout);
 
     if (g_logfile) {
-        fprintf(g_logfile, "[%s] [%s] ", time_str, level);
-        vfprintf(g_logfile, fmt, args2);
-        fprintf(g_logfile, "\n");
+        fprintf(g_logfile, "[%s] [%s] %s\n", time_str, level, msg);
         fflush(g_logfile);
     }
 
-    va_end(args1);
-    va_end(args2);
+    /* Record in ring buffer */
+    g_ring_last_id++;
+    log_entry_t *e = ring_slot(g_ring_last_id);
+    memset(e, 0, sizeof(*e));
+    e->id = g_ring_last_id;
+    e->ts = (int64_t)now;
+    strncpy(e->level, level ? level : "INFO", sizeof(e->level) - 1);
+    strncpy(e->msg, msg, sizeof(e->msg) - 1);
+    e->persisted = (log_level_rank(e->level) >= 2) ? 0 : 1;
 
     pthread_mutex_unlock(&g_log_mutex);
 }
